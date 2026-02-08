@@ -1,0 +1,124 @@
+name: "Supply Chain Security"
+description: "Detect dependency confusion, typosquatting, malicious package sources, and post-install script attacks"
+version: "1.0.0"
+author: "AgentShield Security Research"
+
+defaults:
+  protected_paths:
+    - "~/.npmrc"
+    - "~/.pypirc"
+    - "~/.pip/**"
+    - "~/.config/pip/**"
+    - "~/.yarnrc"
+    - "~/.cargo/config.toml"
+    - "~/.m2/settings.xml"
+
+rules:
+  # === BLOCK: Non-standard package registries ===
+  - id: "sc-block-npm-registry-override"
+    match:
+      command_regex: "npm\\s+(install|i|add).*--registry\\s+(?!https://registry\\.npmjs\\.org)"
+    decision: "BLOCK"
+    reason: "npm install with non-standard registry override blocked. May be dependency confusion attack."
+
+  - id: "sc-block-pip-extra-index"
+    match:
+      command_regex: "pip\\s+install.*--extra-index-url"
+    decision: "BLOCK"
+    reason: "pip install with --extra-index-url blocked. Risk of dependency confusion."
+
+  - id: "sc-block-pip-trusted-host"
+    match:
+      command_regex: "pip\\s+install.*--trusted-host"
+    decision: "BLOCK"
+    reason: "pip install with --trusted-host bypasses TLS verification."
+
+  # === BLOCK: Direct URL installs (bypass registry) ===
+  - id: "sc-block-pip-url-install"
+    match:
+      command_regex: "pip\\s+install\\s+(https?://|git\\+)"
+    decision: "BLOCK"
+    reason: "pip install from URL bypasses PyPI. Download and inspect first."
+
+  - id: "sc-block-npm-url-install"
+    match:
+      command_regex: "npm\\s+(install|i)\\s+(https?://|git\\+|git://)"
+    decision: "BLOCK"
+    reason: "npm install from URL bypasses registry verification."
+
+  # === BLOCK: Config file tampering ===
+  - id: "sc-block-npmrc-edit"
+    match:
+      command_regex: "(echo|cat|sed|tee).*\\.npmrc"
+    decision: "BLOCK"
+    reason: "Modification of .npmrc blocked — may redirect package resolution."
+
+  - id: "sc-block-pypirc-edit"
+    match:
+      command_regex: "(echo|cat|sed|tee).*\\.pypirc"
+    decision: "BLOCK"
+    reason: "Modification of .pypirc blocked — may redirect package resolution."
+
+  # === BLOCK: Post-install script manipulation ===
+  - id: "sc-block-npm-ignore-scripts-off"
+    match:
+      command_regex: "npm\\s+config\\s+set\\s+ignore-scripts\\s+false"
+    decision: "BLOCK"
+    reason: "Re-enabling npm post-install scripts is risky. Keep ignore-scripts=true in agent context."
+
+  # === AUDIT: Standard package installs ===
+  - id: "sc-audit-npm-install"
+    match:
+      command_prefix: ["npm install", "npm i ", "npm add", "npx "]
+    decision: "AUDIT"
+    reason: "npm package install flagged for supply-chain review."
+
+  - id: "sc-audit-pip-install"
+    match:
+      command_prefix: ["pip install", "pip3 install", "pipx install"]
+    decision: "AUDIT"
+    reason: "pip package install flagged for supply-chain review."
+
+  - id: "sc-audit-yarn-add"
+    match:
+      command_prefix: ["yarn add", "pnpm add", "pnpm install"]
+    decision: "AUDIT"
+    reason: "Yarn/pnpm package install flagged for supply-chain review."
+
+  - id: "sc-audit-brew-install"
+    match:
+      command_prefix: ["brew install", "brew cask install"]
+    decision: "AUDIT"
+    reason: "Homebrew install flagged for supply-chain review."
+
+  - id: "sc-audit-go-get"
+    match:
+      command_prefix: ["go get ", "go install "]
+    decision: "AUDIT"
+    reason: "Go module fetch flagged for supply-chain review."
+
+  - id: "sc-audit-cargo-install"
+    match:
+      command_prefix: ["cargo install", "cargo add"]
+    decision: "AUDIT"
+    reason: "Cargo package install flagged for supply-chain review."
+
+  - id: "sc-audit-gem-install"
+    match:
+      command_prefix: ["gem install"]
+    decision: "AUDIT"
+    reason: "RubyGems install flagged for supply-chain review."
+
+  # === AUDIT: Lock file modifications ===
+  - id: "sc-audit-lockfile-edit"
+    match:
+      command_regex: "(rm|sed|perl|python)\\s+.*(package-lock|yarn\\.lock|Pipfile\\.lock|poetry\\.lock|go\\.sum|Cargo\\.lock|Gemfile\\.lock)"
+    decision: "AUDIT"
+    reason: "Lock file modification flagged — may indicate supply-chain tampering."
+
+  # === AUDIT: Global installs ===
+  - id: "sc-audit-global-install"
+    match:
+      command_regex: "(npm|pip|pip3)\\s+install\\s+(-g|--global)"
+    decision: "AUDIT"
+    reason: "Global package install has wider system impact. Flagged for review."

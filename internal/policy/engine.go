@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	unicheck "github.com/gzhole/agentshield/internal/unicode"
 )
 
 type Engine struct {
@@ -26,6 +28,26 @@ func (e *Engine) Evaluate(command string, paths []string) EvalResult {
 		Decision:       e.policy.Defaults.Decision,
 		TriggeredRules: []string{},
 		Reasons:        []string{},
+	}
+
+	// Built-in: Unicode smuggling detection (runs before all rules)
+	uniScan := unicheck.Scan(command)
+	if !uniScan.Clean {
+		hasBlockLevel := false
+		for _, threat := range uniScan.Threats {
+			result.TriggeredRules = append(result.TriggeredRules, "unicode-"+threat.Category)
+			result.Reasons = append(result.Reasons, threat.Description)
+			if threat.Severity == "block" {
+				hasBlockLevel = true
+			}
+		}
+		if hasBlockLevel {
+			result.Decision = DecisionBlock
+		} else {
+			result.Decision = DecisionAudit
+		}
+		result.Explanation = buildExplanation(result)
+		return result
 	}
 
 	if blocked, rule := e.checkProtectedPaths(paths); blocked {

@@ -1,99 +1,138 @@
 # AgentShield
 
-**Local-first security gateway for AI agents** — Prevent prompt-injection-driven damage, data exfiltration, and destructive actions.
+**Local-first runtime security gateway for AI agents** — Audit, block, and govern every command your AI agent executes.
 
 ## Why AgentShield?
 
-AI coding agents (Windsurf, Claude Code, Copilot, etc.) increasingly execute commands with real side effects. This creates security risks:
+AI coding agents (Windsurf, Claude Code, OpenClaw, Cursor, etc.) execute shell commands with real side effects. This creates security risks:
 
 - **Prompt injection becomes operational** — Malicious content can steer agent actions
 - **Over-permissioned tools** — Agents have access to shell, files, tokens
-- **Human approve fatigue** — "Just click yes" becomes dangerous
-- **No audit trail** — "What ran, why, and when?"
+- **No audit trail** — "What did the agent do while I was away?"
+- **Credential exfiltration** — Agents can read `~/.ssh`, `~/.aws`, environment variables
 
-AgentShield gates every command through **deterministic policy rules** before execution.
+AgentShield sits between the agent and the OS, enforcing **deterministic policy rules** and logging every action.
+
+## Install
+
+```bash
+# Homebrew (macOS / Linux)
+brew tap gzhole/tap
+brew install agentshield
+
+# Or build from source
+make build
+sudo make install
+
+# Or curl installer
+curl -sSL https://raw.githubusercontent.com/gzhole/agentshield/main/scripts/install.sh | bash
+```
 
 ## Quick Start
 
 ```bash
-# Build and install
-make build
-sudo make install
-
-# Copy default policy
-mkdir -p ~/.agentshield
-cp configs/default_policy.yaml ~/.agentshield/policy.yaml
-
 # Run a command through AgentShield
 agentshield run -- echo "hello world"
 
-# Check version
-agentshield version
+# View the audit trail
+agentshield log
+
+# View summary stats
+agentshield log --summary
+
+# Show only flagged (AUDIT) entries
+agentshield log --flagged
+
+# Show only blocked commands
+agentshield log --decision BLOCK
 ```
 
 ## Demo
 
 ```bash
-# This gets BLOCKED
+# ✅ Safe commands execute normally
+$ agentshield run -- ls -la
+total 48
+drwxr-xr-x  12 user  staff  384 Feb  8 10:00 .
+...
+
+# 🛑 Destructive commands are BLOCKED
 $ agentshield run -- rm -rf /
-❌ BLOCKED by AgentShield
+🛑 BLOCKED by AgentShield
+Decision: BLOCK
 Triggered rules: block-rm-root
-Reasons: Destructive remove at filesystem root is never allowed.
+Reasons:
+  - Destructive remove at filesystem root is not allowed.
 
-# This requires APPROVAL
+# 🛑 Credential access is BLOCKED
+$ agentshield run -- cat ~/.ssh/id_rsa
+🛑 BLOCKED by AgentShield
+Decision: BLOCK
+Triggered rules: protected-path
+Reasons:
+  - Access to protected path denied: ~/.ssh/**
+
+# 🔍 Risky commands are AUDITED (executed + flagged for review)
 $ agentshield run -- npm install lodash
-⚠️  APPROVAL REQUIRED
-Command: npm install lodash
-Reasons: Package installs can introduce supply-chain risk.
-[a] Approve once  [d] Deny
+added 2 packages in 0.8s
+# (flagged in audit log for review)
 
-# This runs in SANDBOX first
-$ agentshield run -- sed -i 's/foo/bar/g' file.txt
-🔒 SANDBOX MODE
-Running command in sandbox to preview changes...
-📋 Sandbox Results:
-1 file(s) changed:
-  ~ file.txt (+5 bytes)
-[a] Approve once  [d] Deny
-```
-
-## Configuration
-
-AgentShield creates `~/.agentshield/` with:
-- `policy.yaml` — Policy rules (allow/deny/approve/sandbox)
-- `audit.jsonl` — Append-only audit log (with automatic redaction)
-
-### Policy Example
-
-```yaml
-version: "0.1"
-defaults:
-  decision: "REQUIRE_APPROVAL"
-  protected_paths:
-    - "~/.ssh/**"
-    - "~/.aws/**"
-
-rules:
-  - id: "block-rm-root"
-    match:
-      command_regex: "^rm\\s+-rf\\s+/"
-    decision: "BLOCK"
-    reason: "Never delete root"
-
-  - id: "allow-ls"
-    match:
-      command_prefix: ["ls", "pwd"]
-    decision: "ALLOW"
+# 📊 Review what happened
+$ agentshield log --summary
+═══════════════════════════════════════════
+  AgentShield Audit Summary
+═══════════════════════════════════════════
+  Total events:    6
+  ALLOW:           2
+  AUDIT (flagged): 2
+  BLOCK:           2
+═══════════════════════════════════════════
 ```
 
 ## Decisions
 
 | Decision | Behavior |
 |----------|----------|
-| `ALLOW` | Execute immediately |
-| `REQUIRE_APPROVAL` | Prompt user for approval |
-| `SANDBOX` | Run in sandbox, show diff, then approve |
-| `BLOCK` | Deny with explanation |
+| `ALLOW` | Execute, log normally |
+| `AUDIT` | Execute, flag in log for review |
+| `BLOCK` | Deny with explanation, log |
+
+## Configuration
+
+AgentShield creates `~/.agentshield/` with:
+- `policy.yaml` — Policy rules (ALLOW / AUDIT / BLOCK)
+- `audit.jsonl` — Append-only audit log (with automatic secret redaction)
+
+### Policy Example
+
+```yaml
+version: "0.1"
+defaults:
+  decision: "AUDIT"
+  protected_paths:
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - "~/.gnupg/**"
+
+rules:
+  - id: "block-rm-root"
+    match:
+      command_regex: "^(rm|sudo rm)\\s+-rf\\s+/(\\s|$)"
+    decision: "BLOCK"
+    reason: "Destructive remove at filesystem root is not allowed."
+
+  - id: "audit-package-installs"
+    match:
+      command_prefix: ["npm install", "pip install", "brew install"]
+    decision: "AUDIT"
+    reason: "Package installs flagged for supply-chain review."
+
+  - id: "allow-safe-readonly"
+    match:
+      command_prefix: ["ls", "pwd", "whoami", "git status", "git diff"]
+    decision: "ALLOW"
+    reason: "Read-only / low-risk command."
+```
 
 ## Flags
 
@@ -105,11 +144,11 @@ rules:
 
 ## Security Features
 
-- **Protected paths** — Block access to `~/.ssh`, `~/.aws`, etc.
-- **Automatic redaction** — Secrets never logged (AWS keys, tokens, passwords)
-- **Fail-safe** — Unknown commands require approval, not auto-allow
-- **Sandbox preview** — See what changes before applying
-- **Audit trail** — Every decision logged with timestamp and rule
+- **Protected paths** — Block access to `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`
+- **Automatic redaction** — Secrets never logged (AWS keys, GitHub tokens, passwords)
+- **Fail-safe** — Unknown commands default to AUDIT, not ALLOW
+- **Audit trail** — Every decision logged with timestamp, rule, and reason
+- **Agent-agnostic** — Works with Windsurf, OpenClaw, Claude Code, or any shell-based agent
 
 ## Development
 
@@ -122,7 +161,7 @@ make clean    # Clean artifacts
 
 ## Architecture
 
-See `Design/` folder for C4 architecture diagrams and design decisions.
+See [`Design/`](Design/) for architecture diagrams, competitive analysis, and growth strategy.
 
 ## License
 

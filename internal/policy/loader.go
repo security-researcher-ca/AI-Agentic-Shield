@@ -21,7 +21,7 @@ func Load(path string) (*Policy, error) {
 	}
 
 	if policy.Defaults.Decision == "" {
-		policy.Defaults.Decision = DecisionRequireApproval
+		policy.Defaults.Decision = DecisionAudit
 	}
 	if policy.Defaults.NonInteractive == "" {
 		policy.Defaults.NonInteractive = DecisionBlock
@@ -34,7 +34,7 @@ func DefaultPolicy() *Policy {
 	return &Policy{
 		Version: "0.1",
 		Defaults: Defaults{
-			Decision:       DecisionRequireApproval,
+			Decision:       DecisionAudit,
 			NonInteractive: DecisionBlock,
 			LogRedaction:   true,
 			ProtectedPaths: []string{
@@ -69,19 +69,19 @@ func DefaultPolicy() *Policy {
 				Reason:   "Blocking pipe-to-shell execution. Download and inspect scripts first.",
 			},
 			{
-				ID: "approve-package-installs",
+				ID: "audit-package-installs",
 				Match: Match{CommandPrefix: []string{
 					"npm install", "pnpm add", "yarn add",
 					"pip install", "poetry add", "brew install",
 				}},
-				Decision: DecisionRequireApproval,
-				Reason:   "Package installs can introduce supply-chain risk.",
+				Decision: DecisionAudit,
+				Reason:   "Package installs can introduce supply-chain risk. Flagged for audit.",
 			},
 			{
-				ID:       "sandbox-file-edits",
+				ID:       "audit-file-edits",
 				Match:    Match{CommandPrefix: []string{"sed ", "perl -pi", "python -c"}},
-				Decision: DecisionSandbox,
-				Reason:   "In-place edits are sandboxed so you can review diffs first.",
+				Decision: DecisionAudit,
+				Reason:   "In-place file edits flagged for audit review.",
 			},
 			{
 				ID:       "allow-safe-readonly",

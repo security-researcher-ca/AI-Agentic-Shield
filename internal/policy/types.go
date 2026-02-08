@@ -3,10 +3,9 @@ package policy
 type Decision string
 
 const (
-	DecisionAllow           Decision = "ALLOW"
-	DecisionRequireApproval Decision = "REQUIRE_APPROVAL"
-	DecisionSandbox         Decision = "SANDBOX"
-	DecisionBlock           Decision = "BLOCK"
+	DecisionAllow Decision = "ALLOW"
+	DecisionAudit Decision = "AUDIT"
+	DecisionBlock Decision = "BLOCK"
 )
 
 type Policy struct {

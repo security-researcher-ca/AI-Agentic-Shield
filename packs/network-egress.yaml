@@ -1,0 +1,122 @@
+name: "Network Egress Control"
+description: "Detect data exfiltration, C2 communication, unauthorized network access, and DNS tunneling"
+version: "1.0.0"
+author: "AgentShield Security Research"
+
+network:
+  allow_domains:
+    - "github.com"
+    - "api.github.com"
+    - "pypi.org"
+    - "files.pythonhosted.org"
+    - "registry.npmjs.org"
+    - "formulae.brew.sh"
+    - "proxy.golang.org"
+    - "sum.golang.org"
+    - "crates.io"
+    - "rubygems.org"
+
+rules:
+  # === BLOCK: Reverse shell tools ===
+  - id: "ne-block-netcat"
+    match:
+      command_regex: "^(nc|ncat|netcat|socat)\\s"
+    decision: "BLOCK"
+    reason: "Netcat/socat can open reverse shells or exfiltrate data."
+
+  - id: "ne-block-telnet"
+    match:
+      command_prefix: ["telnet "]
+    decision: "BLOCK"
+    reason: "Telnet is unencrypted and commonly used for reverse shells."
+
+  - id: "ne-block-dev-tcp"
+    match:
+      command_regex: "/dev/(tcp|udp)/"
+    decision: "BLOCK"
+    reason: "Bash /dev/tcp and /dev/udp are used for reverse shells."
+
+  # === BLOCK: DNS tunneling indicators ===
+  - id: "ne-block-dns-tunnel"
+    match:
+      command_regex: "(dig|nslookup|host)\\s+.*TXT\\s"
+    decision: "BLOCK"
+    reason: "DNS TXT lookups can be used for data exfiltration via DNS tunneling."
+
+  # === AUDIT: HTTP/HTTPS requests ===
+  - id: "ne-audit-curl"
+    match:
+      command_prefix: ["curl "]
+    decision: "AUDIT"
+    reason: "HTTP request flagged for network egress review."
+
+  - id: "ne-audit-wget"
+    match:
+      command_prefix: ["wget "]
+    decision: "AUDIT"
+    reason: "HTTP download flagged for network egress review."
+
+  - id: "ne-audit-httpie"
+    match:
+      command_prefix: ["http ", "https "]
+    decision: "AUDIT"
+    reason: "HTTPie request flagged for network egress review."
+
+  # === AUDIT: SSH connections ===
+  - id: "ne-audit-ssh"
+    match:
+      command_prefix: ["ssh "]
+    decision: "AUDIT"
+    reason: "SSH connection flagged for lateral movement review."
+
+  # === AUDIT: File transfers ===
+  - id: "ne-audit-scp"
+    match:
+      command_prefix: ["scp "]
+    decision: "AUDIT"
+    reason: "SCP file transfer flagged for data exfiltration review."
+
+  - id: "ne-audit-rsync-remote"
+    match:
+      command_regex: "rsync\\s+.*:"
+    decision: "AUDIT"
+    reason: "Remote rsync flagged for data exfiltration review."
+
+  - id: "ne-audit-sftp"
+    match:
+      command_prefix: ["sftp "]
+    decision: "AUDIT"
+    reason: "SFTP transfer flagged for data exfiltration review."
+
+  # === AUDIT: DNS lookups ===
+  - id: "ne-audit-dns"
+    match:
+      command_prefix: ["dig ", "nslookup ", "host "]
+    decision: "AUDIT"
+    reason: "DNS lookup flagged for reconnaissance review."
+
+  # === AUDIT: Cloud CLI tools ===
+  - id: "ne-audit-aws-cli"
+    match:
+      command_prefix: ["aws "]
+    decision: "AUDIT"
+    reason: "AWS CLI command flagged — may access cloud resources."
+
+  - id: "ne-audit-gcloud"
+    match:
+      command_prefix: ["gcloud "]
+    decision: "AUDIT"
+    reason: "GCloud CLI command flagged — may access cloud resources."
+
+  - id: "ne-audit-az-cli"
+    match:
+      command_prefix: ["az "]
+    decision: "AUDIT"
+    reason: "Azure CLI command flagged — may access cloud resources."
+
+  # === AUDIT: Git push (data leaving machine) ===
+  - id: "ne-audit-git-push"
+    match:
+      command_prefix: ["git push"]
+    decision: "AUDIT"
+    reason: "Git push sends data to remote — flagged for review."

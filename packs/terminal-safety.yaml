@@ -1,0 +1,137 @@
+name: "Terminal Safety"
+description: "Block destructive commands, privilege escalation, and resource exhaustion attacks"
+version: "1.0.0"
+author: "AgentShield Security Research"
+
+defaults:
+  protected_paths: []
+
+rules:
+  # === BLOCK: Filesystem destruction ===
+  - id: "ts-block-rm-root"
+    match:
+      command_regex: "^(sudo\\s+)?rm\\s+.*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+/($|\\s)"
+    decision: "BLOCK"
+    reason: "Destructive recursive remove at filesystem root."
+
+  - id: "ts-block-rm-force-recursive"
+    match:
+      command_regex: "^(sudo\\s+)?rm\\s+.*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+(/etc|/usr|/var|/boot|/sys|/proc)($|/|\\s)"
+    decision: "BLOCK"
+    reason: "Recursive force-remove on critical system directory."
+
+  - id: "ts-block-mkfs"
+    match:
+      command_regex: "^(sudo\\s+)?mkfs"
+    decision: "BLOCK"
+    reason: "Filesystem creation can destroy disk data."
+
+  - id: "ts-block-dd-zero"
+    match:
+      command_regex: "^(sudo\\s+)?dd\\s+.*if=/dev/(zero|urandom|random)"
+    decision: "BLOCK"
+    reason: "dd from /dev/zero or /dev/urandom can overwrite disks."
+
+  # === BLOCK: Fork bomb and resource exhaustion ===
+  - id: "ts-block-fork-bomb"
+    match:
+      command_regex: ":\\(\\)\\{.*:\\|:.*\\}|\\bfork\\b.*\\bwhile\\b.*\\btrue\\b"
+    decision: "BLOCK"
+    reason: "Fork bomb detected — can crash the system."
+
+  # === BLOCK: Permission weakening ===
+  - id: "ts-block-chmod-777"
+    match:
+      command_regex: "^(sudo\\s+)?chmod\\s+(-R\\s+)?777\\s+/"
+    decision: "BLOCK"
+    reason: "chmod 777 on root paths removes all file protections."
+
+  - id: "ts-block-chmod-recursive-sensitive"
+    match:
+      command_regex: "^(sudo\\s+)?chmod\\s+-R\\s+.*(/etc|/usr|/var|/home)"
+    decision: "BLOCK"
+    reason: "Recursive permission change on sensitive system directory."
+
+  # === BLOCK: Pipe-to-shell ===
+  - id: "ts-block-pipe-to-shell"
+    match:
+      command_regex: "^(curl|wget).*\\|\\s*(sh|bash|zsh|dash|ksh|fish)"
+    decision: "BLOCK"
+    reason: "Pipe-to-shell executes unreviewed remote code."
+
+  # === BLOCK: Reverse shell indicators ===
+  - id: "ts-block-netcat"
+    match:
+      command_regex: "^(nc|ncat|netcat|socat)\\s"
+    decision: "BLOCK"
+    reason: "Netcat/socat can open reverse shells."
+
+  - id: "ts-block-bash-dev-tcp"
+    match:
+      command_regex: "/dev/tcp/"
+    decision: "BLOCK"
+    reason: "Bash /dev/tcp is commonly used for reverse shells."
+
+  # === BLOCK: System shutdown/reboot ===
+  - id: "ts-block-shutdown"
+    match:
+      command_prefix: ["shutdown", "reboot", "halt", "poweroff", "init 0", "init 6"]
+    decision: "BLOCK"
+    reason: "System shutdown/reboot must be done manually."
+
+  # === AUDIT: Privilege escalation tracking ===
+  - id: "ts-audit-sudo"
+    match:
+      command_prefix: ["sudo "]
+    decision: "AUDIT"
+    reason: "Sudo command flagged for privilege escalation review."
+
+  - id: "ts-audit-chown"
+    match:
+      command_prefix: ["chown ", "chgrp "]
+    decision: "AUDIT"
+    reason: "Ownership change flagged for review."
+
+  - id: "ts-audit-crontab"
+    match:
+      command_prefix: ["crontab "]
+    decision: "AUDIT"
+    reason: "Crontab modification flagged for persistence review."
+
+  - id: "ts-audit-systemctl"
+    match:
+      command_prefix: ["systemctl ", "launchctl "]
+    decision: "AUDIT"
+    reason: "Service management flagged for review."
+
+  # === ALLOW: Common safe commands ===
+  - id: "ts-allow-readonly"
+    match:
+      command_prefix:
+        - "ls"
+        - "pwd"
+        - "whoami"
+        - "id"
+        - "uname"
+        - "date"
+        - "uptime"
+        - "df"
+        - "du"
+        - "free"
+        - "top -l"
+        - "ps "
+        - "which "
+        - "type "
+        - "file "
+        - "head "
+        - "tail "
+        - "wc "
+        - "sort "
+        - "uniq "
+        - "grep "
+        - "find "
+        - "echo "
+        - "printf "
+        - "cat "
+    decision: "ALLOW"
+    reason: "Read-only or informational command."

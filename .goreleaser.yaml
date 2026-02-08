@@ -1,0 +1,54 @@
+project_name: agentshield
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: agentshield
+    main: ./cmd/agentshield
+    binary: agentshield
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X 'github.com/gzhole/agentshield/internal/cli.Version={{.Version}}'
+      - -X 'github.com/gzhole/agentshield/internal/cli.GitCommit={{.ShortCommit}}'
+      - -X 'github.com/gzhole/agentshield/internal/cli.BuildDate={{.Date}}'
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+brews:
+  - name: agentshield
+    repository:
+      owner: gzhole
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/gzhole/agentshield"
+    description: "Local-first runtime security gateway for AI agents"
+    license: "MIT"
+    install: |
+      bin.install "agentshield"
+    test: |
+      system "#{bin}/agentshield", "version"

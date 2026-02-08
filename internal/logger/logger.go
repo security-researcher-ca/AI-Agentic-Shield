@@ -14,12 +14,11 @@ type AuditEvent struct {
 	Args           []string `json:"args"`
 	Cwd            string   `json:"cwd"`
 	Decision       string   `json:"decision"`
+	Flagged        bool     `json:"flagged,omitempty"`
 	TriggeredRules []string `json:"triggered_rules,omitempty"`
+	Reasons        []string `json:"reasons,omitempty"`
 	Mode           string   `json:"mode"`
-	UserAction     string   `json:"user_action,omitempty"`
 	Error          string   `json:"error,omitempty"`
-	GuardianScore  float64  `json:"guardian_score,omitempty"`
-	GuardianSignals []string `json:"guardian_signals,omitempty"`
 }
 
 type AuditLogger struct {

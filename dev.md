@@ -584,6 +584,524 @@ agentshield dashboard --show-blocked --show-approved
 agentshield monitor --alert-on "rm *, sudo *, git push"
 ```
 
+## Sandbox Mode Deep Dive
+
+### How Sandbox Mode Works
+
+Sandbox mode provides a **preview-and-approve** workflow for potentially dangerous commands. It creates a temporary copy of the workspace, executes the command there, captures all changes, and presents them for user review before applying to the real system.
+
+### Sandbox Execution Flow
+
+```mermaid
+flowchart TD
+    Start[Command Triggers Sandbox] --> CreateTemp[Create Temporary Directory]
+    CreateTemp --> CopyWorkspace[Copy Workspace to Temp]
+    CopyWorkspace --> CaptureBefore[Capture File System State]
+    CaptureBefore --> ExecuteInTemp[Execute Command in Temp Dir]
+    ExecuteInTemp --> CaptureAfter[Capture After State]
+    CaptureAfter --> ComputeDiff[Compute File Changes]
+    ComputeDiff --> ShowResults[Show Changes to User]
+    ShowResults --> UserDecision{User Approves?}
+    
+    UserDecision -->|Yes| ApplyToReal[Apply to Real Workspace]
+    UserDecision -->|No| DiscardChanges[Discard Changes]
+    
+    ApplyToReal --> CleanupTemp[Cleanup Temp Directory]
+    DiscardChanges --> CleanupTemp
+    CleanupTemp --> End[End]
+    
+    subgraph "Change Detection"
+        CD1[Compare file sizes]
+        CD2[Compare modification times]
+        CD3[Detect new files]
+        CD4[Detect deleted files]
+    end
+```
+
+### Code Walkthrough
+
+#### 1. Sandbox Runner Initialization
+
+```go
+// internal/sandbox/sandbox.go:31-44
+func NewRunner(workDir string) (*Runner, error) {
+    isGit := isGitRepo(workDir)  // Check if workspace is a git repo
+    
+    tempDir, err := os.MkdirTemp("", "agentshield-sandbox-*")
+    if err != nil {
+        return nil, fmt.Errorf("failed to create temp dir: %w", err)
+    }
+
+    return &Runner{
+        workDir: workDir,  // Original workspace directory
+        tempDir: tempDir,  // Temporary sandbox directory  
+        isGit:   isGit,    // Git repository flag
+    }, nil
+}
+```
+
+**Key Points:**
+- Creates a temporary directory with prefix `agentshield-sandbox-*`
+- Detects if the workspace is a git repository (for future git-aware features)
+- Stores both original and temporary directory paths
+
+#### 2. Workspace Copying
+
+```go
+// internal/sandbox/sandbox.go:94-96
+func (r *Runner) copyWorkspace() error {
+    return copyDir(r.workDir, r.tempDir)
+}
+
+// internal/sandbox/sandbox.go:204-231
+func copyDir(src, dst string) error {
+    return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+        // Skip .git directories to avoid repository contamination
+        if info.Name() == ".git" && info.IsDir() {
+            return filepath.SkipDir
+        }
+        
+        // Copy directories and files with preserved permissions
+        if info.IsDir() {
+            return os.MkdirAll(dstPath, info.Mode())
+        }
+        return copyFile(path, dstPath, info.Mode())
+    })
+}
+```
+
+**Key Points:**
+- Recursively copies the entire workspace to temp directory
+- **Skips `.git` directories** to prevent sandbox contamination
+- Preserves file permissions and directory structure
+- Creates an exact replica for isolated execution
+
+#### 3. State Capture
+
+```go
+// internal/sandbox/sandbox.go:104-136
+func (r *Runner) captureState() (map[string]fileState, error) {
+    state := make(map[string]fileState)
+    maxFiles := 10000  // Prevent excessive file scanning
+    
+    err := filepath.Walk(r.tempDir, func(path string, info os.FileInfo, err error) error {
+        if info.IsDir() {
+            return nil  // Skip directories, only track files
+        }
+        
+        relPath, _ := filepath.Rel(r.tempDir, path)
+        state[relPath] = fileState{
+            size:    info.Size(),           // File size in bytes
+            modTime: info.ModTime().UnixNano(),  // Modification timestamp
+            exists:  true,                 // File existence flag
+        }
+        return nil
+    })
+    return state, err
+}
+```
+
+**Key Points:**
+- Captures **file size** and **modification time** for every file
+- Stores relative paths to enable comparison
+- Limits to 10,000 files to prevent performance issues
+- Creates a snapshot "before" and "after" for diff computation
+
+#### 4. Command Execution in Sandbox
+
+```go
+// internal/sandbox/sandbox.go:52-83
+func (r *Runner) Run(args []string) Result {
+    // 1. Copy workspace to temp directory
+    if err := r.copyWorkspace(); err != nil {
+        return Result{Error: fmt.Errorf("failed to copy workspace: %w", err)}
+    }
+
+    // 2. Capture state before execution
+    beforeState, err := r.captureState()
+    
+    // 3. Execute command in TEMP directory (not original!)
+    cmd := exec.Command(args[0], args[1:]...)
+    cmd.Dir = r.tempDir  // <-- Critical: Execute in sandbox, not original
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    cmdErr := cmd.Run()
+
+    // 4. Capture state after execution
+    afterState, err := r.captureState()
+    
+    // 5. Compute changes
+    changes := r.computeChanges(beforeState, afterState)
+    diffSummary := r.buildDiffSummary(changes)
+
+    return Result{
+        Success:      cmdErr == nil,
+        ChangedFiles: changes,
+        DiffSummary:  diffSummary,
+        Error:        cmdErr,
+    }
+}
+```
+
+**Critical Insight:** The command executes **only in the temp directory**, leaving the original workspace untouched.
+
+#### 5. Change Detection Algorithm
+
+```go
+// internal/sandbox/sandbox.go:138-169
+func (r *Runner) computeChanges(before, after map[string]fileState) []FileChange {
+    changes := []FileChange{}
+
+    // Detect ADDED and MODIFIED files
+    for path, afterInfo := range after {
+        beforeInfo, existed := before[path]
+        if !existed {
+            // File didn't exist before = ADDED
+            changes = append(changes, FileChange{
+                Path:      path,
+                Action:    "added",
+                SizeDelta: afterInfo.size,
+            })
+        } else if afterInfo.modTime != beforeInfo.modTime || afterInfo.size != beforeInfo.size {
+            // File changed = MODIFIED
+            changes = append(changes, FileChange{
+                Path:      path,
+                Action:    "modified", 
+                SizeDelta: afterInfo.size - beforeInfo.size,
+            })
+        }
+    }
+
+    // Detect DELETED files
+    for path := range before {
+        if _, exists := after[path]; !exists {
+            changes = append(changes, FileChange{
+                Path:      path,
+                Action:    "deleted",
+                SizeDelta: -before[path].size,
+            })
+        }
+    }
+    return changes
+}
+```
+
+**Detection Logic:**
+- **Added**: File exists in "after" but not "before"
+- **Modified**: File exists in both but size or timestamp changed
+- **Deleted**: File exists in "before" but not "after"
+
+#### 6. User Approval Workflow
+
+```go
+// internal/cli/run.go:138-189
+case policy.DecisionSandbox:
+    fmt.Fprintln(os.Stderr, "\n🔒 SANDBOX MODE")
+    
+    // 1. Create sandbox runner
+    runner, err := sandbox.NewRunner(cwd)
+    defer runner.Cleanup()  // Always cleanup temp directory
+    
+    // 2. Run command in sandbox
+    result := runner.Run(args)
+    
+    // 3. Show results to user
+    fmt.Fprintln(os.Stderr, "\n🔍 Sandbox Results:")
+    fmt.Fprintln(os.Stderr, result.DiffSummary)
+    
+    // 4. If no changes, exit early
+    if len(result.ChangedFiles) == 0 {
+        fmt.Fprintln(os.Stderr, "No changes detected. Nothing to apply.")
+        return nil
+    }
+    
+    // 5. Ask for user approval
+    approvalResult := approval.Ask(prompt)
+    if !approvalResult.Approved {
+        fmt.Fprintln(os.Stderr, "\n❌ Changes not applied")
+        os.Exit(1)
+    }
+    
+    // 6. Apply to REAL workspace
+    fmt.Fprintln(os.Stderr, "\n✅ Applying changes to real workspace...")
+    if err := runner.Apply(args); err != nil {
+        // Handle error
+    }
+```
+
+### Example Usage
+
+```bash
+# Policy triggers sandbox for git commands
+agentshield run -- git add . && git commit -m "dangerous changes"
+
+# Output:
+🔒 SANDBOX MODE
+Running command in sandbox to preview changes...
+
+🔍 Sandbox Results:
+3 file(s) changed:
+  + src/new_file.js (new, 1234 bytes)
+  ~ package.json (+15 bytes)
+  - old_file.js (removed)
+
+Summary: 1 added, 1 modified, 1 deleted
+
+╔══════════════════════════════════════════════════════════════╗
+║              ⚠️  APPROVAL REQUIRED                            ║
+╚══════════════════════════════════════════════════════════════╝
+Command: git add . && git commit -m "dangerous changes"
+Reasons:
+  • Review the changes above before applying
+
+Options:
+  [a] Approve once - execute this command
+  [d] Deny - block this command
+
+Your choice [a/d]: a
+
+✅ Applying changes to real workspace...
+Changes applied successfully.
+```
+
+### Security Model & Human Approval Challenge
+
+#### The Critical Flaw: Self-Approval
+
+You're absolutely right - there's a **critical security vulnerability** in the current sandbox model:
+
+```mermaid
+flowchart TD
+    Agent[AI Agent] --> Trigger[Trigger Sandbox]
+    Trigger --> Execute[Execute in Sandbox]
+    Execute --> Show[Show Changes]
+    Show --> Approve{Who Approves?}
+    
+    Approve -->|Agent| Auto[Agent Auto-Approves]
+    Approve -->|Human| Manual[Human Reviews]
+    
+    Auto --> Apply[Apply Changes]
+    Manual --> Apply
+    
+    subgraph "Security Problem"
+        Problem[Agent can approve its own changes]
+        Risk[No human oversight]
+    end
+```
+
+**The Problem:** If an AI agent can:
+1. Execute `agentshield run -- dangerous-command`
+2. Automatically respond to the approval prompt with "a"
+
+Then the sandbox provides **zero security** - it's just a slower way to execute dangerous commands.
+
+#### Real-World Attack Scenario
+
+```bash
+# AI agent executes this:
+#!/bin/bash
+# agent-script.sh
+
+echo "a" | agentshield run -- rm -rf /important/data
+# The agent pipes "a" (approve) to the approval prompt
+# Result: Sandbox shows changes, auto-approves, applies destructive changes
+```
+
+#### Solutions for Secure Sandbox Implementation
+
+##### Solution 1: Out-of-Band Human Approval
+
+```go
+// internal/approval/approval.go - Enhanced approval
+func AskSecure(p Prompt) Result {
+    if !IsHumanInteractive() {
+        return Result{
+            Approved:   false,
+            UserAction: "auto_deny_non_human",
+            Reason:     "Non-interactive session detected - human approval required",
+        }
+    }
+    
+    // Additional checks for human presence
+    if !RequirePhysicalConfirmation() {
+        return Result{
+            Approved:   false,
+            UserAction: "require_physical_confirmation",
+            Reason:     "Physical confirmation required for sandbox approval",
+        }
+    }
+    
+    // Continue with normal approval flow...
+}
+```
+
+**Implementation:**
+- **Detect non-interactive sessions** (pipes, scripts)
+- **Require physical confirmation** (keyboard input, mouse click)
+- **Multi-factor approval** (password + confirmation)
+
+##### Solution 2: Separate Approval Channel
+
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent
+    participant AS as AgentShield
+    participant App as Approval Service
+    participant Human as Human User
+    participant Mobile as Mobile App
+    
+    Agent->>AS: agentshield run -- dangerous-command
+    AS->>AS: Execute in sandbox
+    AS->>App: Create approval request
+    App->>Mobile: Push notification
+    App->>Email: Email approval request
+    
+    Human->>Mobile: Review changes
+    Human->>Mobile: Approve/Deny
+    
+    Mobile->>App: Approval decision
+    App->>AS: Approval result
+    AS->>Agent: Execute or deny
+```
+
+**Implementation:**
+- **External approval service** (separate process)
+- **Mobile app notifications** for approval
+- **Email/SMS approval** links
+- **Time-limited approval windows**
+
+##### Solution 3: Policy-Based Auto-Approval Rules
+
+```yaml
+# ~/.agentshield/approval-policy.yaml
+auto_approval:
+  enabled: false
+  require_human_for:
+    - "sandbox_decisions"
+    - "file_deletions"
+    - "system_changes"
+  
+  safe_auto_approve:
+    - "file_creates < 1MB"
+    - "config_file_changes"
+    - "read_only_operations"
+  
+  require_manual_approval:
+    - "deletions: true"
+    - "file_count > 10"
+    - "system_paths: ['/etc', '/usr/bin', '~/.ssh']"
+```
+
+##### Solution 4: Human-in-the-Loop Architecture
+
+```go
+// Enhanced sandbox with human verification
+func (r *Runner) RunWithHumanVerification(args []string) Result {
+    result := r.Run(args)
+    
+    // Always require human for sandbox approval
+    if !IsHumanSession() {
+        return Result{
+            Success: false,
+            Error:   fmt.Errorf("sandbox approval requires human interactive session"),
+        }
+    }
+    
+    // Additional verification steps
+    verification := HumanVerification{
+        RequirePassword: true,
+        RequireConfirmationCode: true,
+        Timeout: 300, // 5 minutes
+    }
+    
+    if !verification.Verify() {
+        return Result{
+            Success: false,
+            Error:   fmt.Errorf("human verification failed"),
+        }
+    }
+    
+    return result
+}
+```
+
+#### Recommended Security Architecture
+
+```mermaid
+graph TB
+    subgraph "AI Agent Zone"
+        AI[AI Agent]
+        AI --> AS[AgentShield CLI]
+    end
+    
+    subgraph "Security Zone"
+        AS --> Sandbox[Sandbox Execution]
+        Sandbox --> Changes[Change Detection]
+        Changes --> Approval[Human Approval Service]
+    end
+    
+    subgraph "Human Zone"
+        Approval --> Mobile[Mobile App]
+        Approval --> Web[Web Dashboard]
+        Approval --> Email[Email Notifications]
+        
+        Mobile --> Human[Human User]
+        Web --> Human
+        Email --> Human
+        
+        Human --> Decision[Approval Decision]
+        Decision --> Approval
+    end
+    
+    Approval --> AS
+    AS --> Real[Real Execution]
+```
+
+#### Implementation Priority
+
+1. **Immediate**: Detect and block non-interactive approval attempts
+2. **Short-term**: Implement separate approval channel
+3. **Medium-term**: Add mobile/web approval interface
+4. **Long-term**: Multi-factor approval with audit trails
+
+#### Code Example: Secure Approval Detection
+
+```go
+// internal/approval/security.go
+func IsHumanInteractive() bool {
+    // Check if stdin is a terminal (not a pipe/file)
+    if !term.IsTerminal(int(os.Stdin.Fd())) {
+        return false
+    }
+    
+    // Check for common automation environment variables
+    automationVars := []string{
+        "CI", "AUTOMATION", "AGENT_MODE", "NON_INTERACTIVE",
+    }
+    
+    for _, env := range automationVars {
+        if os.Getenv(env) != "" {
+            return false
+        }
+    }
+    
+    // Additional heuristics...
+    return true
+}
+
+func RequirePhysicalConfirmation() bool {
+    // Could integrate with:
+    // - System authentication dialogs
+    // - Hardware security keys
+    // - Biometric verification
+    return true
+}
+```
+
+#### Summary
+
+The sandbox's security value **completely depends** on preventing self-approval. Without robust human verification, sandbox mode is just security theater. The solution requires **architectural separation** between the agent (requester) and the approval authority (human).
+
 ## Security Model
 
 - **Defense in Depth**: Multiple layers of security checks
