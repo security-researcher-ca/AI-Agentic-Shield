@@ -12,16 +12,38 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var setupWindsurfCmd = &cobra.Command{
+	Use:   "windsurf",
+	Short: "Set up AgentShield for Windsurf IDE",
+	Long: `Install Cascade Hooks so every command Windsurf's AI agent runs is
+evaluated by AgentShield before execution.
+
+  agentshield setup windsurf`,
+	RunE: setupWindsurfCommand,
+}
+
+var setupCursorCmd = &cobra.Command{
+	Use:   "cursor",
+	Short: "Set up AgentShield for Cursor IDE",
+	Long: `Show instructions to configure Cursor's terminal profile to use
+AgentShield's wrapper shell.
+
+  agentshield setup cursor`,
+	RunE: setupCursorCommand,
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Set up AgentShield for your environment",
 	Long: `Set up AgentShield integration with IDE agents and install default policy packs.
 
-Run without arguments to see integration instructions:
-  agentshield setup
+IDE-specific setup:
+  agentshield setup windsurf    # install Cascade Hooks (recommended)
+  agentshield setup cursor      # show terminal profile config
 
-Install the wrapper script and default packs automatically:
-  agentshield setup --install`,
+General setup:
+  agentshield setup --install   # install wrapper + policy packs
+  agentshield setup             # show all integration instructions`,
 	RunE: setupCommand,
 }
 
@@ -29,6 +51,8 @@ var installFlag bool
 
 func init() {
 	setupCmd.Flags().BoolVar(&installFlag, "install", false, "Install wrapper script and default policy packs")
+	setupCmd.AddCommand(setupWindsurfCmd)
+	setupCmd.AddCommand(setupCursorCmd)
 	rootCmd.AddCommand(setupCmd)
 }
 
@@ -99,10 +123,177 @@ func runSetupInstall() error {
 	return nil
 }
 
+// ─── Windsurf Setup ─────────────────────────────────────────────────────────
+
+func setupWindsurfCommand(cmd *cobra.Command, args []string) error {
+	hooksPath := filepath.Join(os.Getenv("HOME"), ".codeium", "windsurf", "hooks.json")
+	hooksDir := filepath.Dir(hooksPath)
+
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println("  AgentShield + Windsurf (Cascade Hooks)")
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println()
+
+	// Check if agentshield is in PATH
+	binPath, err := exec.LookPath("agentshield")
+	if err != nil {
+		fmt.Println("⚠  agentshield not found in PATH. Install it first:")
+		fmt.Println("   brew tap gzhole/tap && brew install agentshield")
+		return nil
+	}
+	fmt.Printf("✅ agentshield found: %s\n", binPath)
+
+	// Check for existing hooks.json
+	if _, err := os.Stat(hooksPath); err == nil {
+		// Read existing hooks
+		data, err := os.ReadFile(hooksPath)
+		if err == nil && strings.Contains(string(data), "agentshield hook") {
+			fmt.Printf("✅ Cascade Hook already configured: %s\n", hooksPath)
+			fmt.Println()
+			fmt.Println("AgentShield is active. Test it by asking Cascade to run:")
+			fmt.Println("  rm -rf /")
+			fmt.Println("  cat ~/.ssh/id_ed25519")
+			fmt.Println()
+			printStatus()
+			return nil
+		}
+		// Hooks file exists but doesn't have our hook — show manual instructions
+		fmt.Printf("⚠  Existing hooks.json found: %s\n", hooksPath)
+		fmt.Println("   Add this to the \"hooks\" object manually:")
+		fmt.Println()
+		fmt.Println(`   "pre_run_command": [`)
+		fmt.Println(`     {`)
+		fmt.Println(`       "command": "agentshield hook",`)
+		fmt.Println(`       "show_output": true`)
+		fmt.Println(`     }`)
+		fmt.Println(`   ]`)
+		fmt.Println()
+		return nil
+	}
+
+	// Create hooks.json
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", hooksDir, err)
+	}
+
+	hooksContent := `{
+  "hooks": {
+    "pre_run_command": [
+      {
+        "command": "agentshield hook",
+        "show_output": true
+      }
+    ]
+  }
+}
+`
+	if err := os.WriteFile(hooksPath, []byte(hooksContent), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", hooksPath, err)
+	}
+
+	fmt.Printf("✅ Cascade Hook installed: %s\n", hooksPath)
+	fmt.Println()
+	fmt.Println("How it works:")
+	fmt.Println("  1. Cascade (Windsurf's AI) tries to run a command")
+	fmt.Println("  2. The pre_run_command hook calls `agentshield hook`")
+	fmt.Println("  3. AgentShield evaluates the command against your policy")
+	fmt.Println("  4. If BLOCK: Cascade is prevented from running the command")
+	fmt.Println("  5. If ALLOW/AUDIT: the command runs normally")
+	fmt.Println()
+	fmt.Println("Restart Windsurf to activate the hook, then test by asking")
+	fmt.Println("Cascade to run: rm -rf /")
+	fmt.Println()
+	printStatus()
+	return nil
+}
+
+// ─── Cursor Setup ───────────────────────────────────────────────────────────
+
+func setupCursorCommand(cmd *cobra.Command, args []string) error {
+	hooksPath := filepath.Join(os.Getenv("HOME"), ".cursor", "hooks.json")
+	hooksDir := filepath.Dir(hooksPath)
+
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println("  AgentShield + Cursor (Hooks)")
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println()
+
+	// Check if agentshield is in PATH
+	binPath, err := exec.LookPath("agentshield")
+	if err != nil {
+		fmt.Println("⚠  agentshield not found in PATH. Install it first:")
+		fmt.Println("   brew tap gzhole/tap && brew install agentshield")
+		return nil
+	}
+	fmt.Printf("✅ agentshield found: %s\n", binPath)
+
+	// Check for existing hooks.json
+	if _, err := os.Stat(hooksPath); err == nil {
+		data, err := os.ReadFile(hooksPath)
+		if err == nil && strings.Contains(string(data), "agentshield hook") {
+			fmt.Printf("✅ Cursor Hook already configured: %s\n", hooksPath)
+			fmt.Println()
+			fmt.Println("AgentShield is active. Test by asking Agent to run:")
+			fmt.Println("  rm -rf /")
+			fmt.Println("  cat ~/.ssh/id_ed25519")
+			fmt.Println()
+			printStatus()
+			return nil
+		}
+		fmt.Printf("⚠  Existing hooks.json found: %s\n", hooksPath)
+		fmt.Println("   Add this to the \"hooks\" object manually:")
+		fmt.Println()
+		fmt.Println(`   "beforeShellExecution": [`)
+		fmt.Println(`     {`)
+		fmt.Println(`       "command": "agentshield hook",`)
+		fmt.Println(`       "show_output": true`)
+		fmt.Println(`     }`)
+		fmt.Println(`   ]`)
+		fmt.Println()
+		return nil
+	}
+
+	// Create hooks.json
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("failed to create %s: %w", hooksDir, err)
+	}
+
+	hooksContent := `{
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "agentshield hook",
+        "show_output": true
+      }
+    ]
+  }
+}
+`
+	if err := os.WriteFile(hooksPath, []byte(hooksContent), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", hooksPath, err)
+	}
+
+	fmt.Printf("✅ Cursor Hook installed: %s\n", hooksPath)
+	fmt.Println()
+	fmt.Println("How it works:")
+	fmt.Println("  1. Cursor's Agent tries to run a command")
+	fmt.Println("  2. The beforeShellExecution hook calls `agentshield hook`")
+	fmt.Println("  3. AgentShield evaluates the command against your policy")
+	fmt.Println("  4. If BLOCK: Agent is prevented from running the command")
+	fmt.Println("  5. If ALLOW/AUDIT: the command runs normally")
+	fmt.Println()
+	fmt.Println("Restart Cursor to activate the hook, then test by asking")
+	fmt.Println("Agent to run: rm -rf /")
+	fmt.Println()
+	printStatus()
+	return nil
+}
+
+// ─── Generic Setup Instructions ─────────────────────────────────────────────
+
 func printSetupInstructions() {
 	wrapperPath := filepath.Join(getShareDir(), "agentshield-wrapper.sh")
 
-	// Check if wrapper exists
 	wrapperExists := false
 	if _, err := os.Stat(wrapperPath); err == nil {
 		wrapperExists = true
@@ -118,28 +309,34 @@ func printSetupInstructions() {
 		fmt.Println()
 	}
 
-	fmt.Println("─── IDE Agent Integration (Windsurf, Cursor, etc.) ───")
+	fmt.Println("─── Windsurf (Recommended) ───────────────────────────")
 	fmt.Println()
-	fmt.Println("Configure your IDE to use AgentShield as the agent's shell:")
+	fmt.Println("  Uses native Cascade Hooks — no shell changes needed.")
+	fmt.Println("  One command to install:")
 	fmt.Println()
-	fmt.Printf("  Shell path: %s\n", wrapperPath)
-	fmt.Println("  Shell args: -c")
+	fmt.Println("    agentshield setup windsurf")
 	fmt.Println()
-	fmt.Println("The wrapper intercepts every command the agent runs,")
-	fmt.Println("evaluates it against your policy, and blocks dangerous actions.")
+
+	fmt.Println("─── Cursor ───────────────────────────────────────────")
+	fmt.Println()
+	fmt.Println("  Uses native Cursor Hooks (beforeShellExecution).")
+	fmt.Println("  One command to install:")
+	fmt.Println()
+	fmt.Println("    agentshield setup cursor")
 	fmt.Println()
 
 	fmt.Println("─── Claude Code ───────────────────────────────────────")
 	fmt.Println()
-	fmt.Println("In your Claude Code settings, set the shell override:")
+	fmt.Println("  Set the shell override in Claude Code settings:")
 	fmt.Println()
-	fmt.Printf("  \"shell\": \"%s\"\n", wrapperPath)
+	fmt.Printf("    \"shell\": \"%s\"\n", wrapperPath)
 	fmt.Println()
 
 	fmt.Println("─── Direct CLI Usage ─────────────────────────────────")
 	fmt.Println()
 	fmt.Println("  agentshield run -- <command>         # evaluate & run")
 	fmt.Println("  agentshield run --shell -- \"cmd\"     # shell string mode")
+	fmt.Println("  agentshield hook                     # Windsurf hook handler")
 	fmt.Println("  agentshield log                      # view audit trail")
 	fmt.Println("  agentshield log --summary            # audit summary")
 	fmt.Println("  agentshield pack list                # show policy packs")
@@ -151,7 +348,6 @@ func printSetupInstructions() {
 	fmt.Println("  unset AGENTSHIELD_BYPASS       # re-enable")
 	fmt.Println()
 
-	// Show current status
 	fmt.Println("─── Current Status ───────────────────────────────────")
 	fmt.Println()
 	printStatus()

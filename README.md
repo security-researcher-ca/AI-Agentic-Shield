@@ -64,29 +64,52 @@ The recommended deployment: **put AgentShield in the agent's execution path only
 
 ## Agent Integration
 
-### Method 1: Shell Wrapper (Recommended for IDE Agents)
+### Method 1: IDE Hooks (Recommended)
 
-Most AI coding agents (Windsurf, Claude Code, Cursor, etc.) spawn a shell to execute commands. AgentShield ships a wrapper script that acts as a shell replacement — every command the agent runs is evaluated against your policy before execution.
+AgentShield integrates natively with IDE hook systems. One command installs everything — the hook intercepts every command the agent runs and blocks dangerous actions **before execution**.
 
 ```bash
-# After brew install, run setup to install wrapper + policy packs:
-agentshield setup --install
+# Windsurf (uses Cascade Hooks — pre_run_command)
+agentshield setup windsurf
 
-# View integration instructions:
+# Cursor (uses Cursor Hooks — beforeShellExecution)
+agentshield setup cursor
+
+# View all integration options
 agentshield setup
 ```
 
-The wrapper is installed to `$(brew --prefix)/share/agentshield/agentshield-wrapper.sh`. Configure your IDE agent to use it:
+When the agent tries to run a blocked command, you'll see:
 
-| IDE / Agent | Setting |
+![AgentShield blocking a command in Windsurf](docs/images/windsurf-hook-blocked.png)
+
+| IDE | Hook System | Setup Command | How it blocks |
+|---|---|---|---|
+| **Windsurf** | Cascade Hooks (`pre_run_command`) | `agentshield setup windsurf` | Exit code 2 |
+| **Cursor** | Cursor Hooks (`beforeShellExecution`) | `agentshield setup cursor` | JSON `permission: deny` |
+| **Claude Code** | Shell wrapper | See [Shell Wrapper](#method-2-shell-wrapper) | Exit code 1 |
+
+The `agentshield hook` command auto-detects the IDE format from the JSON input — no configuration needed.
+
+### Method 2: Shell Wrapper (For Claude Code / Other Agents)
+
+For IDEs without native hooks, AgentShield ships a wrapper script that acts as a shell replacement:
+
+```bash
+# Install wrapper + policy packs:
+agentshield setup --install
+```
+
+The wrapper is installed to `$(brew --prefix)/share/agentshield/agentshield-wrapper.sh`. Configure your agent:
+
+| Agent | Setting |
 |---|---|
-| **Windsurf** | Settings → Agent → Shell path: `/opt/homebrew/share/agentshield/agentshield-wrapper.sh` |
-| **Claude Code** | `"shell": "/opt/homebrew/share/agentshield/agentshield-wrapper.sh"` |
-| **Cursor** | Settings → Terminal → Shell path |
+| **Claude Code** | `"shell": "$(brew --prefix)/share/agentshield/agentshield-wrapper.sh"` |
+| **Custom agents** | Set shell path to the wrapper script |
 
 The wrapper intercepts `shell -c "command"` invocations, evaluates the raw command string against the full policy pipeline, and only executes if allowed.
 
-### Method 2: Direct CLI Wrapping (For Agent Frameworks)
+### Method 3: Direct CLI Wrapping (For Agent Frameworks)
 
 If you control the agent's code (LangChain, AutoGen, CrewAI, custom agents), replace the shell execution call:
 
@@ -109,7 +132,7 @@ result = subprocess.run(
 cmd := exec.Command("agentshield", "run", "--", "cat", "/etc/passwd")
 ```
 
-### Method 3: PATH Interception (For Maximum Coverage)
+### Method 4: PATH Interception (For Maximum Coverage)
 
 Create command-specific interceptors that shadow system binaries:
 
@@ -271,7 +294,8 @@ rules:
 - **Automatic redaction** — Secrets never logged (AWS keys, GitHub tokens, passwords)
 - **Fail-safe** — Unknown commands default to AUDIT, not ALLOW
 - **Audit trail** — Every decision logged with timestamp, rule, and reason
-- **Agent-agnostic** — Works with Windsurf, OpenClaw, Claude Code, or any shell-based agent
+- **Native IDE hooks** — One-command setup for Windsurf (Cascade Hooks) and Cursor (Cursor Hooks)
+- **Agent-agnostic** — Works with Windsurf, Cursor, Claude Code, or any shell-based agent
 - **Multi-layer analysis** — 6-layer pipeline (Regex + Structural + Semantic + Dataflow + Stateful + Guardian) for defense-in-depth
 - **Unicode smuggling detection** — Blocks homoglyphs, zero-width characters, and bidirectional overrides
 

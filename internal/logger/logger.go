@@ -18,6 +18,7 @@ type AuditEvent struct {
 	TriggeredRules []string `json:"triggered_rules,omitempty"`
 	Reasons        []string `json:"reasons,omitempty"`
 	Mode           string   `json:"mode"`
+	Source         string   `json:"source,omitempty"`
 	Error          string   `json:"error,omitempty"`
 }
 
