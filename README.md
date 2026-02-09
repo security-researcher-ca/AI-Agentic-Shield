@@ -98,31 +98,40 @@ unset AGENTSHIELD_BYPASS       # re-enable
 
 ## Configuration
 
-AgentShield creates `~/.agentshield/` on first run:
+AgentShield uses `~/.agentshield/` for runtime data:
+
+```
+~/.agentshield/
+├── audit.jsonl      # Append-only audit log (auto-created)
+└── packs/           # Policy packs (installed via `agentshield setup --install`)
+    ├── terminal-safety.yaml
+    ├── secrets-pii.yaml
+    ├── network-egress.yaml
+    └── supply-chain.yaml
+```
+
+Built-in defaults protect `~/.ssh`, `~/.aws`, `~/.gnupg`, block `rm -rf /`, and audit package installs — no config file needed.
+
+To **override defaults** or add custom rules, create `~/.agentshield/policy.yaml`:
 
 ```yaml
-# ~/.agentshield/policy.yaml
 version: "0.1"
 defaults:
   decision: "AUDIT"
   protected_paths:
     - "~/.ssh/**"
     - "~/.aws/**"
-    - "~/.gnupg/**"
+    - "~/my-company-secrets/**"    # add your own
 
 rules:
-  - id: block-rm-root
+  - id: block-production-db
     match:
-      command_regex: "^(rm|sudo rm)\\s+-rf\\s+/(\\s|$)"
+      command_regex: "psql.*prod"
     decision: "BLOCK"
-    reason: "Destructive remove at filesystem root."
-
-  - id: audit-package-installs
-    match:
-      command_prefix: ["npm install", "pip install", "brew install"]
-    decision: "AUDIT"
-    reason: "Package installs flagged for supply-chain review."
+    reason: "Direct production database access is not allowed."
 ```
+
+See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax, analyzer layers, and examples.
 
 ## Security Highlights
 
@@ -136,6 +145,7 @@ rules:
 
 ## Documentation
 
+- [Policy Authoring Guide](docs/policy-guide.md) — Rule syntax, analyzer layers, custom packs, recipes
 - [Architecture & Pipeline Details](docs/architecture.md)
 - [Accuracy Baseline & Red-Team Results](docs/accuracy.md)
 
