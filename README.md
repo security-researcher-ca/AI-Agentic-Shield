@@ -114,25 +114,27 @@ cmd := exec.Command("agentshield", "run", "--", "cat", "/etc/passwd")
 Create command-specific interceptors that shadow system binaries:
 
 ```bash
+INTERCEPT_DIR="$(brew --prefix)/lib/agentshield/bin"
+
 # Create interceptor directory
-sudo mkdir -p /usr/local/lib/agentshield/bin
+sudo mkdir -p "$INTERCEPT_DIR"
 
 # Create interceptors for dangerous commands
 for cmd in rm git curl wget ssh scp; do
-  cat > "/usr/local/lib/agentshield/bin/$cmd" << 'EOF'
+  sudo tee "$INTERCEPT_DIR/$cmd" > /dev/null << 'EOF'
 #!/bin/sh
 exec agentshield run -- /usr/bin/$cmd "$@"
 EOF
-  chmod +x "/usr/local/lib/agentshield/bin/$cmd"
+  sudo chmod +x "$INTERCEPT_DIR/$cmd"
 done
 
 # Prepend to the agent's PATH (not your own shell)
-export PATH="/usr/local/lib/agentshield/bin:$PATH"
+export PATH="$INTERCEPT_DIR:$PATH"
 ```
 
-### Bypass for Humans
+### Bypass Mode
 
-If you source the wrapper globally but want to bypass for interactive use:
+To temporarily disable AgentShield (e.g. for debugging):
 
 ```bash
 # Temporarily disable
