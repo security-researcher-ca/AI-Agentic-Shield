@@ -2,11 +2,13 @@
 
 **Local-first runtime security gateway for LLM agents** — Block dangerous commands before they execute.
 
-AI coding agents (Windsurf, Cursor, Claude Code, etc.) run shell commands with real side effects.
+AI coding agents (OpenClaw, Windsurf, Cursor, Claude Code, etc.) run shell commands with real side effects.
 AgentShield sits between the agent and the OS — enforcing deterministic policies, blocking threats, and logging every action.
 
+![AgentShield enabled in OpenClaw](docs/images/openclaw-hook-setup.png)
+AgentShield enabled in OpenClaw
 ![AgentShield blocking a command in Windsurf](docs/images/windsurf-hook-blocked.png)
-
+AgentShield blocking a command in Windsurf
 ## Install
 
 ```bash
