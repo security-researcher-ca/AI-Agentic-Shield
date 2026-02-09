@@ -27,10 +27,12 @@ type Network struct {
 }
 
 type Rule struct {
-	ID       string   `yaml:"id"`
-	Match    Match    `yaml:"match"`
-	Decision Decision `yaml:"decision"`
-	Reason   string   `yaml:"reason"`
+	ID         string   `yaml:"id"`
+	Taxonomy   string   `yaml:"taxonomy,omitempty"`
+	Match      Match    `yaml:"match"`
+	Decision   Decision `yaml:"decision"`
+	Confidence float64  `yaml:"confidence,omitempty"`
+	Reason     string   `yaml:"reason"`
 }
 
 type Match struct {

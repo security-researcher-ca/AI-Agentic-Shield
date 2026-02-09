@@ -7,12 +7,14 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/gzhole/agentshield/internal/analyzer"
 	unicheck "github.com/gzhole/agentshield/internal/unicode"
 )
 
 type Engine struct {
-	policy  *Policy
-	homeDir string
+	policy   *Policy
+	homeDir  string
+	registry *analyzer.Registry // optional: when set, uses full analyzer pipeline
 }
 
 func NewEngine(p *Policy) (*Engine, error) {
@@ -21,6 +23,18 @@ func NewEngine(p *Policy) (*Engine, error) {
 		homeDir = ""
 	}
 	return &Engine{policy: p, homeDir: homeDir}, nil
+}
+
+// SetRegistry attaches an analyzer pipeline to the engine.
+// When set, Evaluate() uses the full pipeline (regex+structural+semantic+combiner)
+// instead of the built-in regex-only matching.
+func (e *Engine) SetRegistry(r *analyzer.Registry) {
+	e.registry = r
+}
+
+// Policy returns the engine's policy (for inspection/testing).
+func (e *Engine) Policy() *Policy {
+	return e.policy
 }
 
 func (e *Engine) Evaluate(command string, paths []string) EvalResult {
@@ -58,18 +72,65 @@ func (e *Engine) Evaluate(command string, paths []string) EvalResult {
 		return result
 	}
 
+	// If an analyzer registry is set, use the full pipeline.
+	// Otherwise, fall back to built-in regex-only matching.
+	if e.registry != nil {
+		ctx := &analyzer.AnalysisContext{
+			RawCommand: command,
+			Paths:      paths,
+		}
+		combined := e.registry.RunAll(ctx, string(e.policy.Defaults.Decision))
+		result.Decision = Decision(combined.Decision)
+		result.TriggeredRules = combined.TriggeredRules
+		result.Reasons = combined.Reasons
+		result.Explanation = buildExplanation(result)
+		return result
+	}
+
+	// Fallback: built-in regex-only matching (backward compatible).
+	// Evaluate ALL matching rules and pick the highest severity.
+	var bestDecision Decision
+	var bestRules []string
+	var bestReasons []string
+	matched := false
+
 	for _, rule := range e.policy.Rules {
 		if e.matchRule(command, rule) {
-			result.Decision = rule.Decision
-			result.TriggeredRules = append(result.TriggeredRules, rule.ID)
-			result.Reasons = append(result.Reasons, rule.Reason)
-			result.Explanation = buildExplanation(result)
-			return result
+			if !matched || decisionSeverity(rule.Decision) > decisionSeverity(bestDecision) {
+				bestDecision = rule.Decision
+				bestRules = []string{rule.ID}
+				bestReasons = []string{rule.Reason}
+				matched = true
+			} else if decisionSeverity(rule.Decision) == decisionSeverity(bestDecision) {
+				bestRules = append(bestRules, rule.ID)
+				bestReasons = append(bestReasons, rule.Reason)
+			}
 		}
+	}
+
+	if matched {
+		result.Decision = bestDecision
+		result.TriggeredRules = bestRules
+		result.Reasons = bestReasons
 	}
 
 	result.Explanation = buildExplanation(result)
 	return result
+}
+
+// decisionSeverity returns a numeric severity for priority comparison.
+// Higher number = more restrictive decision.
+func decisionSeverity(d Decision) int {
+	switch d {
+	case DecisionBlock:
+		return 3
+	case DecisionAudit:
+		return 2
+	case DecisionAllow:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (e *Engine) matchRule(command string, rule Rule) bool {

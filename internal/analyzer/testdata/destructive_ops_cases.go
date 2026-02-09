@@ -1,0 +1,763 @@
+package testdata
+
+// ===========================================================================
+// Kingdom 1: Destructive Operations
+// ===========================================================================
+//
+// These tests validate detection of commands that irreversibly destroy
+// filesystem data, overwrite disks, exhaust resources, or weaken permissions.
+//
+// Test count targets (high priority = 10 per weakness):
+//   - Category 1.1 Filesystem Destruction: recursive-root-delete (10), system-directory-delete (10)
+//   - Category 1.2 Disk Operations: disk-overwrite (10), filesystem-format (10)
+//   - Category 1.3 Resource Exhaustion: fork-bomb (10)
+//   - Category 1.4 Permission Weakening: chmod-world-writable (10)
+
+// ---------------------------------------------------------------------------
+// Category 1.1: Filesystem Destruction
+// Taxonomy: destructive-ops/fs-destruction/*
+//
+// The primary challenge is flag normalization — attackers (and confused AI
+// agents) use many equivalent flag forms: -rf, --recursive --force, -r -f,
+// etc. The structural analyzer normalizes these; the regex analyzer cannot.
+// ---------------------------------------------------------------------------
+
+// RecursiveRootDeleteCases tests detection of recursive delete at filesystem root.
+// Taxonomy: destructive-ops/fs-destruction/recursive-root-delete
+var RecursiveRootDeleteCases = []TestCase{
+
+	// --- TRUE POSITIVES: Commands that MUST be blocked ---
+
+	{
+		ID:               "TP-FSDESTR-001",
+		Command:          `rm -rf /`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "regex",
+		Description: `Basic recursive force-delete at root. This is the canonical
+			destructive command. Every analyzer layer should catch this.
+			The regex analyzer matches the -rf flag pattern.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "FN-FSDESTR-002",
+		Command:          `rm --recursive --force /`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE NEGATIVE (regex). Long-form flags for rm. The regex
+			analyzer CANNOT catch this because it expects -rf style. The
+			structural analyzer will normalize --recursive to -r and --force
+			to -f, then match. Key case demonstrating structural > regex.`,
+		Tags: []string{"flag-normalization", "structural-required", "known-gap"},
+	},
+	{
+		ID:               "FN-FSDESTR-003",
+		Command:          `rm -r -f /`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE NEGATIVE (regex). Separated short flags. Regex
+			expects -rf combined but -r -f as separate args is semantically
+			identical. Structural analyzer will normalize both forms.`,
+		Tags: []string{"flag-normalization", "structural-required", "known-gap"},
+	},
+	{
+		ID:               "TP-FSDESTR-004",
+		Command:          `sudo rm -rf / --no-preserve-root`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "regex",
+		Description: `Root delete with sudo and --no-preserve-root. The
+			--no-preserve-root flag explicitly overrides the kernel's safety
+			check, making this even more dangerous. Both regex and structural
+			should catch the rm -rf / pattern.`,
+		Tags: []string{"sudo", "critical"},
+	},
+	{
+		ID:               "FN-FSDESTR-004",
+		Command:          `rm -rf /*`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE NEGATIVE (regex). Glob expansion at root.
+			"rm -rf /*" bypasses --no-preserve-root because each expanded
+			path (/bin, /etc, ...) is not "/" itself. Regex matches /($|\s)
+			so /* does not match. Structural analyzer will handle this.`,
+		Tags: []string{"glob-evasion", "structural-required", "known-gap"},
+	},
+
+	// --- TRUE NEGATIVES: Benign commands that MUST NOT be flagged ---
+
+	{
+		ID:               "TN-FSDESTR-001",
+		Command:          `rm -rf ./node_modules`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Description: `Deleting node_modules in current directory is a very common
+			and safe developer operation. The ./ prefix and non-system target
+			make this clearly safe. This MUST NOT trigger the rm-root rule.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-FSDESTR-002",
+		Command:          `rm -rf /tmp/build-output`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Description: `Deleting temp build output. /tmp is not a system-critical
+			directory. The target path is specific, not root. Should not
+			trigger filesystem destruction rules.`,
+		Tags: []string{"common-dev-operation"},
+	},
+
+	// --- FALSE POSITIVES: Benign commands that current regex INCORRECTLY flags ---
+	// These are regression tests — once the structural analyzer is in place,
+	// they should become TN tests.
+
+	{
+		ID:               "FP-FSDESTR-001",
+		Command:          `echo "rm -rf /"`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "regex",
+		Description: `KNOWN FALSE POSITIVE (regex). The regex matches "rm -rf /"
+			inside a string argument to echo. The structural analyzer
+			correctly identifies that "rm -rf /" is an argument to echo,
+			not a command being executed. This is a key motivating case
+			for the structural analyzer layer.`,
+		Tags: []string{"regression", "string-literal", "structural-fixes"},
+	},
+	{
+		ID:               "FP-FSDESTR-002",
+		Command:          `grep "rm -rf" audit.log`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "regex",
+		Description: `KNOWN FALSE POSITIVE (regex). Searching for "rm -rf" in
+			audit logs is a legitimate security analysis task. The regex
+			matches the pattern inside the search string. The structural
+			analyzer sees this as args to grep, not a destructive command.`,
+		Tags: []string{"regression", "string-literal", "structural-fixes"},
+	},
+
+	// --- FALSE NEGATIVES: Malicious commands that current regex MISSES ---
+	// These document known detection gaps. FN tests are skipped (t.Skip) by
+	// the test runner to avoid spurious failures — they track known limitations.
+
+	{
+		ID:               "FN-FSDESTR-001",
+		Command:          `python3 -c "import shutil; shutil.rmtree('/')"`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/recursive-root-delete",
+		Analyzer:         "semantic",
+		Description: `KNOWN FALSE NEGATIVE (all current analyzers). Indirect
+			execution via python -c. The semantic analyzer should classify
+			"python3 -c" as code-execution intent and the structural analyzer
+			(at depth 2) should detect shutil.rmtree('/') as a destructive
+			call. This requires max_parse_depth >= 2.`,
+		Tags: []string{"indirect-execution", "depth-2", "known-gap"},
+	},
+}
+
+// SystemDirectoryDeleteCases tests detection of recursive delete on critical system dirs.
+// Taxonomy: destructive-ops/fs-destruction/system-directory-delete
+var SystemDirectoryDeleteCases = []TestCase{
+
+	// --- TRUE POSITIVES ---
+
+	{
+		ID:               "TP-SYSDIR-001",
+		Command:          `rm -rf /etc`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "regex",
+		Description: `Recursive delete of /etc. This directory contains all system
+			configuration files. Deleting it breaks boot, networking, services,
+			and user authentication. The regex matches /etc as a protected target.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "TP-SYSDIR-002",
+		Command:          `sudo rm -rf /usr/local`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "regex",
+		Description: `Recursive delete of /usr/local with sudo. Contains locally
+			installed programs and libraries. Destruction would break
+			all manually installed software.`,
+		Tags: []string{"sudo", "critical"},
+	},
+	{
+		ID:               "TP-SYSDIR-003",
+		Command:          `rm -rf /var/log`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "regex",
+		Description: `Recursive delete of /var/log. Destroys all system and
+			application logs. This is both destructive and an evasion
+			technique (destroying forensic evidence).`,
+		Tags: []string{"critical"},
+	},
+	{
+		ID:               "FN-SYSDIR-004",
+		Command:          `rm --recursive --force /boot`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "structural",
+		Description: `Long-form flags targeting /boot. Deleting /boot removes the
+			kernel and bootloader, preventing the system from rebooting.
+			Regex may miss this due to long flags; structural catches it.`,
+		Tags: []string{"flag-normalization", "structural-required"},
+	},
+	{
+		ID:               "TP-SYSDIR-005",
+		Command:          `rm -rf /sys`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "regex",
+		Description: `Recursive delete of /sys. This is a virtual filesystem
+			providing kernel interface. While rm -rf /sys won't actually
+			delete kernel objects, it may cause unpredictable behavior.`,
+		Tags: []string{"critical"},
+	},
+
+	// --- TRUE NEGATIVES ---
+
+	{
+		ID:               "TN-SYSDIR-001",
+		Command:          `rm -rf ./dist`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Description: `Deleting a project build directory. This is a completely
+			safe and common developer operation. The target ./dist is
+			a relative path within the project, not a system directory.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-SYSDIR-002",
+		Command:          `rm -rf /tmp/test-output`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Description: `Deleting temp test output. /tmp is a temporary directory
+			designed for ephemeral data. This should not trigger system
+			directory protection rules.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-SYSDIR-003",
+		Command:          `rm -rf /home/user/project/build`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Description: `Deleting a user project build directory. Even though the
+			path starts with /, it's under /home which is user space,
+			not a system directory.`,
+		Tags: []string{"common-dev-operation"},
+	},
+
+	// --- FALSE POSITIVES ---
+
+	{
+		ID:               "FP-SYSDIR-001",
+		Command:          `ls -la /etc`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "regex",
+		Description: `POTENTIAL FALSE POSITIVE. Listing /etc contents is a safe
+			read-only operation. If rules overmatch on any command mentioning
+			/etc, this would be incorrectly flagged. The semantic analyzer
+			should distinguish read vs write operations on system paths.`,
+		Tags: []string{"regression", "read-only"},
+	},
+
+	// --- FALSE NEGATIVES ---
+
+	{
+		ID:               "FN-SYSDIR-001",
+		Command:          `find /etc -delete`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/fs-destruction/system-directory-delete",
+		Analyzer:         "semantic",
+		Description: `KNOWN FALSE NEGATIVE. The "find -delete" pattern deletes all
+			found files without using rm. Current regex rules only match rm
+			patterns. The semantic analyzer should classify "find -delete"
+			on a system path as destructive.`,
+		Tags: []string{"known-gap", "evasion"},
+	},
+}
+
+// ---------------------------------------------------------------------------
+// Category 1.2: Disk & Partition Operations
+// Taxonomy: destructive-ops/disk-ops/*
+// ---------------------------------------------------------------------------
+
+// DiskOverwriteCases tests detection of dd-based disk overwrite operations.
+// Taxonomy: destructive-ops/disk-ops/disk-overwrite
+var DiskOverwriteCases = []TestCase{
+
+	// --- TRUE POSITIVES ---
+
+	{
+		ID:               "TP-DISKWR-001",
+		Command:          `dd if=/dev/zero of=/dev/sda`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "regex",
+		Description: `Canonical disk overwrite: filling /dev/sda with zeros from
+			/dev/zero. This destroys all data on the primary disk. The regex
+			matches the if=/dev/zero pattern.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "TP-DISKWR-002",
+		Command:          `sudo dd if=/dev/urandom of=/dev/nvme0n1`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "regex",
+		Description: `Disk overwrite with random data on NVMe drive. Uses /dev/urandom
+			as input source. The sudo prefix indicates the attacker knows
+			root permissions are needed for block device access.`,
+		Tags: []string{"sudo", "critical"},
+	},
+	{
+		ID:               "TP-DISKWR-003",
+		Command:          `dd if=/dev/random of=/dev/sda bs=1M`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "regex",
+		Description: `Disk overwrite with /dev/random and explicit block size.
+			The bs= parameter doesn't change the destructive intent.
+			Regex should match the if=/dev/random pattern.`,
+		Tags: []string{"critical"},
+	},
+	{
+		ID:               "TP-DISKWR-004",
+		Command:          `dd if=/dev/zero of=/dev/sda1`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "regex",
+		Description: `Partition overwrite (sda1 instead of sda). Targets a specific
+			partition but is equally destructive to data on that partition.
+			Regex should match /dev/zero pattern regardless of target.`,
+		Tags: []string{"critical"},
+	},
+
+	// --- TRUE NEGATIVES ---
+
+	{
+		ID:               "TN-DISKWR-001",
+		Command:          `dd if=image.iso of=/dev/sdb bs=4M`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Description: `Writing an ISO image to a USB drive. This is a legitimate
+			operation for creating bootable media. The input is a file,
+			not /dev/zero or /dev/urandom. Should not trigger the disk
+			overwrite rule.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "FP-DISKWR-002",
+		Command:          `dd if=/dev/zero of=./test.img bs=1M count=100`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE POSITIVE (regex). Creating a test image file.
+			While it uses /dev/zero as input, the output is a regular file
+			(./test.img), not a block device. Current regex blocks all
+			dd if=/dev/zero regardless of output target. The structural
+			analyzer should distinguish file from block device targets.`,
+		Tags: []string{"common-dev-operation", "structural-required", "regression"},
+	},
+
+	// --- FALSE POSITIVES ---
+
+	{
+		ID:               "FP-DISKWR-001",
+		Command:          `echo "dd if=/dev/zero of=/dev/sda"`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "regex",
+		Description: `KNOWN FALSE POSITIVE (regex). The dd pattern appears inside
+			a string argument to echo. Not actually executing dd. The
+			structural analyzer correctly identifies this as echo argument.`,
+		Tags: []string{"regression", "string-literal", "structural-fixes"},
+	},
+
+	// --- FALSE NEGATIVES ---
+
+	{
+		ID:               "FN-DISKWR-001",
+		Command:          `cat /dev/zero > /dev/sda`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "dataflow",
+		Description: `KNOWN FALSE NEGATIVE. Uses cat with redirect instead of dd
+			to overwrite a disk. Functionally identical to dd but uses a
+			different command. The dataflow analyzer should track the flow
+			from /dev/zero through redirect to /dev/sda.`,
+		Tags: []string{"known-gap", "evasion"},
+	},
+	{
+		ID:               "FN-DISKWR-002",
+		Command:          `shred /dev/sda`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/disk-overwrite",
+		Analyzer:         "semantic",
+		Description: `KNOWN FALSE NEGATIVE. shred is a secure deletion tool that
+			overwrites data. Current regex only matches dd patterns. The
+			semantic analyzer should classify shred on a block device
+			as destructive.`,
+		Tags: []string{"known-gap"},
+	},
+}
+
+// FilesystemFormatCases tests detection of mkfs commands.
+// Taxonomy: destructive-ops/disk-ops/filesystem-format
+var FilesystemFormatCases = []TestCase{
+
+	// --- TRUE POSITIVES ---
+
+	{
+		ID:               "TP-MKFS-001",
+		Command:          `mkfs.ext4 /dev/sda1`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Analyzer:         "regex",
+		Description: `Canonical filesystem format. mkfs.ext4 formats a partition
+			with ext4 filesystem, destroying all existing data. The regex
+			matches the mkfs prefix.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "TP-MKFS-002",
+		Command:          `sudo mkfs -t xfs /dev/nvme0n1p1`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Analyzer:         "regex",
+		Description: `mkfs with -t flag for filesystem type and NVMe partition.
+			The -t flag selects filesystem type but the intent is the same:
+			format and destroy data. Regex matches the mkfs prefix.`,
+		Tags: []string{"sudo", "critical"},
+	},
+	{
+		ID:               "TP-MKFS-003",
+		Command:          `mkfs.btrfs /dev/sdb`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Analyzer:         "regex",
+		Description: `btrfs filesystem creation on entire disk. Different
+			filesystem type but same destructive operation.`,
+		Tags: []string{"critical"},
+	},
+
+	// --- TRUE NEGATIVES ---
+
+	{
+		ID:               "TN-MKFS-001",
+		Command:          `df -h`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Description: `Disk free space check. df is a safe read-only command
+			that reports filesystem usage. Should not be confused with mkfs.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-MKFS-002",
+		Command:          `mount /dev/sda1 /mnt`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Description: `Mounting an existing filesystem is a non-destructive
+			operation. Should not trigger the mkfs rule.`,
+		Tags: []string{"common-dev-operation"},
+	},
+
+	// --- FALSE POSITIVES ---
+
+	{
+		ID:               "FP-MKFS-001",
+		Command:          `man mkfs`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Analyzer:         "regex",
+		Description: `POTENTIAL FALSE POSITIVE. Reading the mkfs man page is safe.
+			If regex matches any command starting with "mkfs" it would
+			incorrectly flag "man mkfs". The semantic analyzer should
+			recognize man as a documentation command.`,
+		Tags: []string{"regression", "string-literal"},
+	},
+
+	// --- FALSE NEGATIVES ---
+
+	{
+		ID:               "FN-MKFS-001",
+		Command:          `wipefs -a /dev/sda`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/disk-ops/filesystem-format",
+		Analyzer:         "semantic",
+		Description: `KNOWN FALSE NEGATIVE. wipefs erases filesystem signatures,
+			effectively making data unrecoverable. Current regex only matches
+			mkfs. The semantic analyzer should classify wipefs as destructive.`,
+		Tags: []string{"known-gap"},
+	},
+}
+
+// ---------------------------------------------------------------------------
+// Category 1.3: Resource Exhaustion
+// Taxonomy: destructive-ops/resource-exhaustion/*
+// ---------------------------------------------------------------------------
+
+// ForkBombCases tests detection of fork bomb patterns.
+// Taxonomy: destructive-ops/resource-exhaustion/fork-bomb
+var ForkBombCases = []TestCase{
+
+	// --- TRUE POSITIVES ---
+
+	{
+		ID:               "TP-FORKBMB-001",
+		Command:          `:(){ :|:& };:`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "regex",
+		Description: `Classic bash fork bomb. Defines function : that calls itself
+			twice in a pipeline, backgrounds, then invokes. Exponential
+			process creation crashes the system within seconds.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "FN-FORKBMB-002",
+		Command:          `perl -e 'fork while 1'`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "regex",
+		Description: `Perl fork bomb. Infinite fork loop in Perl one-liner.
+			Regex matches the "fork" + "while" + "true" pattern.`,
+		Tags: []string{"critical"},
+	},
+	{
+		ID:               "TP-FORKBMB-003",
+		Command:          `bash -c ':(){ :|:& };:'`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "structural",
+		Description: `Fork bomb wrapped in bash -c. The fork bomb is inside a
+			string argument to bash. At parse depth 1, the structural
+			analyzer should detect the fork bomb pattern within the
+			bash -c argument.`,
+		Tags: []string{"indirect-execution", "depth-1"},
+	},
+
+	// --- TRUE NEGATIVES ---
+
+	{
+		ID:               "TN-FORKBMB-001",
+		Command:          `ulimit -u 100`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Description: `Setting process limits is a defensive operation that actually
+			protects against fork bombs. Should not be flagged.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-FORKBMB-002",
+		Command:          `nproc`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Description:      `Checking number of processors is a safe informational command.`,
+		Tags:             []string{"common-dev-operation"},
+	},
+
+	// --- FALSE POSITIVES ---
+
+	{
+		ID:               "FP-FORKBMB-001",
+		Command:          `git log --oneline | grep fork`,
+		ExpectedDecision: "ALLOW",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "regex",
+		Description: `POTENTIAL FALSE POSITIVE. The word "fork" appears in context
+			of searching git logs for fork-related commits. If regex matches
+			too broadly on "fork", this legitimate git operation would be
+			incorrectly flagged.`,
+		Tags: []string{"regression", "string-literal"},
+	},
+
+	// --- FALSE NEGATIVES ---
+
+	{
+		ID:               "FN-FORKBMB-001",
+		Command:          `python3 -c "import os; [os.fork() for _ in iter(int, 1)]"`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "semantic",
+		Description: `KNOWN FALSE NEGATIVE. Python fork bomb via indirect execution.
+			The os.fork() call in an infinite comprehension is a fork bomb.
+			Requires semantic analysis of python -c content at depth 2.`,
+		Tags: []string{"indirect-execution", "depth-2", "known-gap"},
+	},
+	{
+		ID:               "FN-FORKBMB-003",
+		Command:          `while true; do bash & done`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "FN",
+		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE NEGATIVE. Shell while-loop fork bomb. Different
+			syntax from the classic :(){ } form but equally destructive.
+			The structural analyzer should detect infinite loops spawning
+			background processes.`,
+		Tags: []string{"known-gap", "evasion"},
+	},
+}
+
+// ---------------------------------------------------------------------------
+// Category 1.4: Permission Weakening
+// Taxonomy: destructive-ops/permission-weakening/*
+// ---------------------------------------------------------------------------
+
+// ChmodWorldWritableCases tests detection of dangerous permission changes.
+// Taxonomy: destructive-ops/permission-weakening/chmod-world-writable
+var ChmodWorldWritableCases = []TestCase{
+
+	// --- TRUE POSITIVES ---
+
+	{
+		ID:               "TP-CHMOD-001",
+		Command:          `chmod 777 /`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Analyzer:         "regex",
+		Description: `chmod 777 at filesystem root. Makes every file on the system
+			readable, writable, and executable by all users. This is the
+			canonical permission weakening command.`,
+		Tags: []string{"canonical", "critical"},
+	},
+	{
+		ID:               "TP-CHMOD-002",
+		Command:          `chmod -R 777 /etc`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Analyzer:         "regex",
+		Description: `Recursive chmod 777 on /etc. Weakens permissions on all system
+			configuration files, allowing any user to modify them.`,
+		Tags: []string{"critical"},
+	},
+	{
+		ID:               "TP-CHMOD-003",
+		Command:          `sudo chmod -R 777 /var`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Analyzer:         "regex",
+		Description: `Recursive chmod 777 on /var with sudo. /var contains logs,
+			databases, mail, and web content. World-writable /var enables
+			log tampering and data modification.`,
+		Tags: []string{"sudo", "critical"},
+	},
+
+	// --- TRUE NEGATIVES ---
+
+	{
+		ID:               "TN-CHMOD-001",
+		Command:          `chmod 755 ./script.sh`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Description: `Setting a script to be executable (755) in the current
+			directory is a completely standard developer operation. 755 is
+			the standard permission for scripts and directories.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-CHMOD-002",
+		Command:          `chmod 644 ./config.yaml`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Description: `Setting a config file to 644 (owner read/write, group/other
+			read-only) is the standard secure permission for config files.`,
+		Tags: []string{"common-dev-operation"},
+	},
+	{
+		ID:               "TN-CHMOD-003",
+		Command:          `chmod +x ./deploy.sh`,
+		ExpectedDecision: "AUDIT",
+		Classification:   "TN",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Description: `Making a deploy script executable with +x on a relative path
+			is a safe operation. The +x flag only adds execute permission
+			without weakening existing protections.`,
+		Tags: []string{"common-dev-operation"},
+	},
+
+	// --- FALSE NEGATIVES ---
+
+	{
+		ID:               "FN-CHMOD-001",
+		Command:          `chmod a+rwx /etc/passwd`,
+		ExpectedDecision: "BLOCK",
+		Classification:   "TP",
+		TaxonomyRef:      "destructive-ops/permission-weakening/chmod-world-writable",
+		Analyzer:         "structural",
+		Description: `KNOWN FALSE NEGATIVE. The symbolic mode "a+rwx" is equivalent
+			to 777 but uses a different syntax. Current regex only matches
+			numeric 777 pattern. The structural analyzer should normalize
+			symbolic and numeric chmod modes to detect equivalence.`,
+		Tags: []string{"known-gap", "flag-normalization"},
+	},
+}
+
+// AllDestructiveOpsCases returns all test cases for Kingdom 1.
+func AllDestructiveOpsCases() []TestCase {
+	var all []TestCase
+	all = append(all, RecursiveRootDeleteCases...)
+	all = append(all, SystemDirectoryDeleteCases...)
+	all = append(all, DiskOverwriteCases...)
+	all = append(all, FilesystemFormatCases...)
+	all = append(all, ForkBombCases...)
+	all = append(all, ChmodWorldWritableCases...)
+	return all
+}

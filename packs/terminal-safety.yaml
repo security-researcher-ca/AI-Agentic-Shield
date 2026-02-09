@@ -9,24 +9,28 @@ defaults:
 rules:
   # === BLOCK: Filesystem destruction ===
   - id: "ts-block-rm-root"
+    taxonomy: "destructive-ops/fs-destruction/recursive-root-delete"
     match:
       command_regex: "^(sudo\\s+)?rm\\s+.*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+/($|\\s)"
     decision: "BLOCK"
     reason: "Destructive recursive remove at filesystem root."
 
   - id: "ts-block-rm-force-recursive"
+    taxonomy: "destructive-ops/fs-destruction/system-directory-delete"
     match:
       command_regex: "^(sudo\\s+)?rm\\s+.*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+(/etc|/usr|/var|/boot|/sys|/proc)($|/|\\s)"
     decision: "BLOCK"
     reason: "Recursive force-remove on critical system directory."
 
   - id: "ts-block-mkfs"
+    taxonomy: "destructive-ops/disk-ops/filesystem-format"
     match:
       command_regex: "^(sudo\\s+)?mkfs"
     decision: "BLOCK"
     reason: "Filesystem creation can destroy disk data."
 
   - id: "ts-block-dd-zero"
+    taxonomy: "destructive-ops/disk-ops/disk-overwrite"
     match:
       command_regex: "^(sudo\\s+)?dd\\s+.*if=/dev/(zero|urandom|random)"
     decision: "BLOCK"
@@ -34,19 +38,22 @@ rules:
 
   # === BLOCK: Fork bomb and resource exhaustion ===
   - id: "ts-block-fork-bomb"
+    taxonomy: "destructive-ops/resource-exhaustion/fork-bomb"
     match:
-      command_regex: ":\\(\\)\\{.*:\\|:.*\\}|\\bfork\\b.*\\bwhile\\b.*\\btrue\\b"
+      command_regex: ":\\(\\)\\{.*:\\|:.*\\}|\\bfork\\b.*\\bwhile\\b.*(\\btrue\\b|\\b1\\b)"
     decision: "BLOCK"
     reason: "Fork bomb detected — can crash the system."
 
   # === BLOCK: Permission weakening ===
   - id: "ts-block-chmod-777"
+    taxonomy: "destructive-ops/permission-weakening/chmod-world-writable"
     match:
       command_regex: "^(sudo\\s+)?chmod\\s+(-R\\s+)?777\\s+/"
     decision: "BLOCK"
     reason: "chmod 777 on root paths removes all file protections."
 
   - id: "ts-block-chmod-recursive-sensitive"
+    taxonomy: "destructive-ops/permission-weakening/chmod-world-writable"
     match:
       command_regex: "^(sudo\\s+)?chmod\\s+-R\\s+.*(/etc|/usr|/var|/home)"
     decision: "BLOCK"
@@ -54,6 +61,7 @@ rules:
 
   # === BLOCK: Pipe-to-shell ===
   - id: "ts-block-pipe-to-shell"
+    taxonomy: "unauthorized-execution/remote-code-exec/pipe-to-shell"
     match:
       command_regex: "^(curl|wget).*\\|\\s*(sh|bash|zsh|dash|ksh|fish)"
     decision: "BLOCK"
@@ -61,12 +69,14 @@ rules:
 
   # === BLOCK: Reverse shell indicators ===
   - id: "ts-block-netcat"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
     match:
       command_regex: "^(nc|ncat|netcat|socat)\\s"
     decision: "BLOCK"
     reason: "Netcat/socat can open reverse shells."
 
   - id: "ts-block-bash-dev-tcp"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
     match:
       command_regex: "/dev/tcp/"
     decision: "BLOCK"
@@ -133,5 +143,12 @@ rules:
         - "echo "
         - "printf "
         - "cat "
+        - "man "
+        - "git log"
+        - "git branch"
+        - "git show"
+        - "git remote"
+        - "git tag"
+        - "git stash list"
     decision: "ALLOW"
     reason: "Read-only or informational command."

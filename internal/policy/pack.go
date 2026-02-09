@@ -50,7 +50,21 @@ func LoadPacks(packsDir string, base *Policy) (*Policy, []PackInfo, error) {
 	result := clonePolicy(base)
 
 	for _, entry := range entries {
-		if entry.IsDir() || !isYAMLFile(entry.Name()) {
+		// Support subdirectory-based loading (packs/regex/, packs/structural/, etc.)
+		// Each subdirectory's YAML files are loaded as packs of that analyzer type.
+		if entry.IsDir() {
+			dirName := entry.Name()
+			enabled := !strings.HasPrefix(dirName, "_")
+			subDir := filepath.Join(packsDir, dirName)
+			subInfos, err := loadPacksFromDir(subDir, dirName, enabled, result)
+			if err != nil {
+				continue
+			}
+			infos = append(infos, subInfos...)
+			continue
+		}
+
+		if !isYAMLFile(entry.Name()) {
 			continue
 		}
 
@@ -93,6 +107,59 @@ func LoadPacks(packsDir string, base *Policy) (*Policy, []PackInfo, error) {
 	}
 
 	return result, infos, nil
+}
+
+// loadPacksFromDir loads all YAML files from an analyzer-type subdirectory
+// (e.g., packs/regex/, packs/structural/) and merges them into the target policy.
+func loadPacksFromDir(dir, analyzerType string, enabled bool, target *Policy) ([]PackInfo, error) {
+	var infos []PackInfo
+
+	subEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, se := range subEntries {
+		if se.IsDir() || !isYAMLFile(se.Name()) {
+			continue
+		}
+
+		path := filepath.Join(dir, se.Name())
+		baseName := strings.TrimSuffix(se.Name(), filepath.Ext(se.Name()))
+		fileEnabled := enabled && !strings.HasPrefix(baseName, "_")
+
+		pack, err := loadPack(path)
+		if err != nil {
+			infos = append(infos, PackInfo{
+				Name:    analyzerType + "/" + baseName,
+				Enabled: fileEnabled,
+				Path:    path,
+			})
+			continue
+		}
+
+		info := PackInfo{
+			Name:        pack.Name,
+			Description: pack.Description,
+			Version:     pack.PackVersion,
+			Author:      pack.Author,
+			Enabled:     fileEnabled,
+			Path:        path,
+			RuleCount:   len(pack.Rules),
+		}
+		if info.Name == "" {
+			info.Name = analyzerType + "/" + baseName
+		}
+		infos = append(infos, info)
+
+		if !fileEnabled {
+			continue
+		}
+
+		mergePackInto(target, pack)
+	}
+
+	return infos, nil
 }
 
 func loadPack(path string) (*Pack, error) {

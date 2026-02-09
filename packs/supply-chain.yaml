@@ -16,18 +16,21 @@ defaults:
 rules:
   # === BLOCK: Non-standard package registries ===
   - id: "sc-block-npm-registry-override"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
     match:
-      command_regex: "npm\\s+(install|i|add).*--registry\\s+(?!https://registry\\.npmjs\\.org)"
+      command_regex: "npm\\s+(install|i|add).*--registry\\s+"
     decision: "BLOCK"
     reason: "npm install with non-standard registry override blocked. May be dependency confusion attack."
 
   - id: "sc-block-pip-extra-index"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
     match:
       command_regex: "pip\\s+install.*--extra-index-url"
     decision: "BLOCK"
     reason: "pip install with --extra-index-url blocked. Risk of dependency confusion."
 
   - id: "sc-block-pip-trusted-host"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
     match:
       command_regex: "pip\\s+install.*--trusted-host"
     decision: "BLOCK"
@@ -35,12 +38,14 @@ rules:
 
   # === BLOCK: Direct URL installs (bypass registry) ===
   - id: "sc-block-pip-url-install"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
     match:
       command_regex: "pip\\s+install\\s+(https?://|git\\+)"
     decision: "BLOCK"
     reason: "pip install from URL bypasses PyPI. Download and inspect first."
 
   - id: "sc-block-npm-url-install"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
     match:
       command_regex: "npm\\s+(install|i)\\s+(https?://|git\\+|git://)"
     decision: "BLOCK"
@@ -48,12 +53,14 @@ rules:
 
   # === BLOCK: Config file tampering ===
   - id: "sc-block-npmrc-edit"
+    taxonomy: "supply-chain/config-tampering/package-config-edit"
     match:
       command_regex: "(echo|cat|sed|tee).*\\.npmrc"
     decision: "BLOCK"
     reason: "Modification of .npmrc blocked — may redirect package resolution."
 
   - id: "sc-block-pypirc-edit"
+    taxonomy: "supply-chain/config-tampering/package-config-edit"
     match:
       command_regex: "(echo|cat|sed|tee).*\\.pypirc"
     decision: "BLOCK"
