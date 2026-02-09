@@ -172,7 +172,7 @@ StructuralAnalyzer.Analyze(ctx)
 Built-in checks and user rules produce findings independently.
 The Combiner applies most-restrictive-wins across ALL findings from ALL layers.
 
-## Phase 2: Dataflow Match (YAML) — Future
+## Phase 2: Dataflow Match (YAML) — ✅ Implemented
 
 ```yaml
 rules:
@@ -189,7 +189,7 @@ rules:
     decision: "BLOCK"
 ```
 
-## Phase 3: Semantic Match (YAML) — Future
+## Phase 3: Semantic Match (YAML) — ✅ Implemented
 
 ```yaml
 rules:
@@ -200,7 +200,7 @@ rules:
     decision: "BLOCK"
 ```
 
-## Phase 4: Stateful Match (YAML) — Future
+## Phase 4: Stateful Match (YAML) — ✅ Implemented
 
 ```yaml
 rules:
@@ -217,8 +217,9 @@ rules:
 
 ## Testing Strategy
 
-1. **Unit tests** for each match predicate (`flags_all`, `args_any`, `pipe_to`, etc.)
-2. **Integration tests** with real YAML packs containing structural rules
-3. **Regression** — existing 123 test cases + 21 red-team cases must pass unchanged
-4. **New test cases** — structural rules that replace regex rules with same behavior
-5. **FP/FN comparison** — structural rules should reduce FP (more precise matching)
+1. **Unit tests** for each match predicate (`flags_all`, `args_any`, `pipe_to`, etc.) — ✅ 52 structural tests
+2. **Dataflow tests** — pipe flows, redirect flows, via transforms, negate — ✅ 16 tests
+3. **Semantic tests** — intent matching, risk_min threshold, negate, analyzer integration — ✅ 16 tests
+4. **Stateful tests** — chain matching, flags in chain, negate, edge cases, analyzer integration — ✅ 13 tests
+5. **Integration tests** with real YAML packs containing all rule types — ✅
+6. **Regression** — existing 123 test cases + 21 red-team cases must pass unchanged — ✅

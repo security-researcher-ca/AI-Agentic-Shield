@@ -198,3 +198,59 @@ rules:
     decision: "BLOCK"
     confidence: 0.90
     reason: "Structural: package install with custom registry override is a supply chain risk."
+
+  # === SEMANTIC RULES ===
+  # These match against intents classified by the built-in semantic analyzer.
+
+  - id: "ts-sem-block-disk-destroy"
+    taxonomy: "destructive-ops/disk-ops/disk-overwrite"
+    match:
+      semantic:
+        intent: "disk-destroy"
+    decision: "BLOCK"
+    confidence: 0.95
+    reason: "Semantic: any command classified as disk-destroy intent is blocked."
+
+  - id: "ts-sem-block-high-risk"
+    match:
+      semantic:
+        risk_min: "critical"
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Semantic: any command with critical risk intent is blocked."
+
+  - id: "ts-sem-allow-dns-safe"
+    taxonomy: "data-exfiltration/network-egress/dns-tunneling"
+    match:
+      semantic:
+        intent: "dns-query-safe"
+    decision: "ALLOW"
+    confidence: 0.90
+    reason: "Semantic: safe DNS queries (DMARC/SPF/DKIM) are allowed."
+
+  # === STATEFUL RULES ===
+  # These match multi-step attack chains within compound commands.
+
+  - id: "ts-sf-block-download-execute"
+    taxonomy: "unauthorized-execution/remote-code-exec/pipe-to-shell"
+    match:
+      stateful:
+        chain:
+          - executable_any: ["curl", "wget", "aria2c", "fetch"]
+            flags_any: ["o", "O", "output"]
+          - executable_any: ["bash", "sh", "zsh", "chmod", "python", "python3", "node"]
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Stateful: download-then-execute chain detected."
+
+  - id: "ts-sf-block-recon-then-exfil"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
+    match:
+      stateful:
+        chain:
+          - executable_any: ["find", "locate", "ls"]
+          - executable_any: ["tar", "zip", "gzip"]
+          - executable_any: ["curl", "wget", "nc", "scp"]
+    decision: "BLOCK"
+    confidence: 0.85
+    reason: "Stateful: reconnaissance → archive → exfiltrate chain detected."

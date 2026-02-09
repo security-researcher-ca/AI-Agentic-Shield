@@ -40,6 +40,9 @@ type Match struct {
 	CommandPrefix []string         `yaml:"command_prefix,omitempty"`
 	CommandRegex  string           `yaml:"command_regex,omitempty"`
 	Structural    *StructuralMatch `yaml:"structural,omitempty"`
+	Dataflow      *DataflowMatch   `yaml:"dataflow,omitempty"`
+	Semantic      *SemanticMatch   `yaml:"semantic,omitempty"`
+	Stateful      *StatefulMatch   `yaml:"stateful,omitempty"`
 }
 
 // StructuralMatch defines a rule that matches against the parsed shell AST
@@ -66,6 +69,49 @@ type StructuralMatch struct {
 
 	// Modifiers
 	Negate bool `yaml:"negate,omitempty"` // invert match (for ALLOW overrides)
+}
+
+// DataflowMatch defines a rule that matches source→sink data flows through
+// pipes, redirects, and command substitutions. Inspired by Fortify's taint
+// tracking: source (where data comes from) → via (transforms) → sink (where it goes).
+type DataflowMatch struct {
+	Source DataflowEndpoint `yaml:"source"`           // data origin
+	Sink   DataflowEndpoint `yaml:"sink"`             // data destination
+	Via    []string         `yaml:"via,omitempty"`    // optional transform commands in between
+	Negate bool             `yaml:"negate,omitempty"` // invert match
+}
+
+// DataflowEndpoint describes one end of a data flow (source or sink).
+type DataflowEndpoint struct {
+	Type     string   `yaml:"type,omitempty"`     // pre-classified: "credential", "sensitive", "zero", "network", "device", "cron"
+	Paths    []string `yaml:"paths,omitempty"`    // glob patterns on file paths
+	Commands []string `yaml:"commands,omitempty"` // command names
+}
+
+// SemanticMatch defines a rule that matches against the command's classified
+// intent. Runs after the built-in semantic analyzer, matching against the
+// accumulated ctx.Intents. This enables decision overrides based on intent.
+type SemanticMatch struct {
+	Intent    string   `yaml:"intent,omitempty"`     // exact intent category match
+	IntentAny []string `yaml:"intent_any,omitempty"` // any of these intent categories
+	RiskMin   string   `yaml:"risk_min,omitempty"`   // minimum risk level: "critical" > "high" > "medium" > "low" > "info"
+	Negate    bool     `yaml:"negate,omitempty"`     // invert match
+}
+
+// StatefulMatch defines a rule that matches multi-step attack chains within
+// a compound command. Each step in the chain matches a segment, connected
+// by operators (&&, ||, ;, |).
+type StatefulMatch struct {
+	Chain  []ChainStep `yaml:"chain"`            // ordered sequence of steps
+	Negate bool        `yaml:"negate,omitempty"` // invert match
+}
+
+// ChainStep is one step in a stateful chain pattern.
+type ChainStep struct {
+	ExecutableAny []string `yaml:"executable_any,omitempty"` // segment executable is one of these
+	FlagsAny      []string `yaml:"flags_any,omitempty"`      // segment has at least one of these flags
+	ArgsAny       []string `yaml:"args_any,omitempty"`       // any positional arg matches glob
+	Operator      string   `yaml:"operator,omitempty"`       // operator connecting to next step: "&&", "||", ";", "|"
 }
 
 // StringOrList allows YAML fields to accept either a single string or a list.

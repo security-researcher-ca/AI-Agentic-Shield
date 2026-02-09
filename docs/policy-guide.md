@@ -176,6 +176,192 @@ Structural rules automatically resolve common short↔long flag aliases:
   reason: "rm with --dry-run does not actually delete files."
 ```
 
+### Dataflow Match
+
+Dataflow rules track data movement from **source** to **sink** through pipes, redirects, and command substitutions. Inspired by Fortify's taint tracking rules.
+
+**When to use dataflow:**
+- Detecting credential exfiltration (credential file → network command)
+- Blocking destructive redirects (/dev/zero → disk device)
+- Catching encoded exfiltration (sensitive → base64 → curl)
+
+#### Dataflow Match Schema
+
+```yaml
+dataflow:
+  source:
+    type: "credential"                # "credential", "sensitive", "zero"
+    paths: ["~/.ssh/**", "~/.aws/**"] # glob patterns on file paths
+    commands: ["cat", "head"]         # commands that read the source
+  sink:
+    type: "network"                   # "network", "device", "cron"
+    commands: ["curl", "wget", "nc"]  # explicit sink commands
+    paths: ["/dev/sd*"]               # glob patterns on sink paths
+  via: ["base64", "gzip"]            # optional: encoding/transform in between
+  negate: false                       # invert match
+```
+
+#### Source/Sink Types
+
+| Type | Description | Examples |
+|------|-------------|---------|
+| `credential` | Credential files | `~/.ssh/id_rsa`, `~/.aws/credentials` |
+| `sensitive` | Sensitive system files | `/etc/passwd`, `/etc/shadow` |
+| `zero` | Zero/random sources | `/dev/zero`, `/dev/urandom` |
+| `network` | Network commands | `curl`, `wget`, `nc`, `ssh` |
+| `device` | Block devices | `/dev/sda`, `/dev/nvme0` |
+| `cron` | Cron/scheduler | `crontab`, `/var/spool/cron/` |
+
+#### Dataflow Rule Examples
+
+```yaml
+# Block credential data piped to any network command
+- id: block-cred-exfil
+  match:
+    dataflow:
+      source:
+        type: "credential"
+      sink:
+        type: "network"
+  decision: "BLOCK"
+  reason: "Credential data flowing to network command."
+
+# Block encoded credential exfiltration (cat ~/.ssh/id_rsa | base64 | curl)
+- id: block-encoded-exfil
+  match:
+    dataflow:
+      source:
+        type: "credential"
+        paths: ["~/.ssh/**", "~/.aws/**"]
+      sink:
+        commands: ["curl", "wget", "nc"]
+      via: ["base64", "gzip", "xxd"]
+  decision: "BLOCK"
+  reason: "Credential data encoded then sent to network."
+
+# Block zero source redirected to disk device
+- id: block-disk-wipe
+  match:
+    dataflow:
+      source:
+        type: "zero"
+      sink:
+        type: "device"
+  decision: "BLOCK"
+  reason: "Writing zeros to disk device is destructive."
+```
+
+### Semantic Match
+
+Semantic rules match against **command intents** classified by the built-in semantic analyzer. This enables decision overrides based on what a command *does*, not what it looks like.
+
+**When to use semantic:**
+- Override decisions for specific intent categories
+- Elevate AUDIT intents to BLOCK (e.g., all critical-risk commands)
+- Suppress false positives by intent (e.g., ALLOW safe DNS queries)
+
+#### Semantic Match Schema
+
+```yaml
+semantic:
+  intent: "disk-destroy"              # exact intent category
+  intent_any: ["file-delete", "disk-destroy"]  # any of these
+  risk_min: "high"                    # minimum risk: "critical" > "high" > "medium" > "low" > "info"
+  negate: false                       # invert match
+```
+
+#### Available Intent Categories
+
+| Intent | Risk | Triggered by |
+|--------|------|-------------|
+| `file-delete` | critical | `find -delete`, `rm` on system paths |
+| `disk-destroy` | critical | `shred`, `wipefs` on block devices |
+| `resource-exhaust` | critical | Fork bombs (`os.fork()`) |
+| `network-scan` | medium | `nmap`, `masscan`, `zmap` |
+| `persistence` | high/critical | `crontab -e`, pipe to crontab |
+| `supply-chain` | high | `pip config set index-url` |
+| `dns-query-safe` | none | `dig _dmarc.*`, `dig _spf.*` |
+
+#### Semantic Rule Examples
+
+```yaml
+# Block any command with disk-destroy intent
+- id: block-disk-destroy
+  match:
+    semantic:
+      intent: "disk-destroy"
+  decision: "BLOCK"
+  reason: "Any disk destruction intent is blocked."
+
+# Block all critical-risk intents
+- id: block-critical-risk
+  match:
+    semantic:
+      risk_min: "critical"
+  decision: "BLOCK"
+  reason: "Critical risk commands require manual review."
+
+# ALLOW safe DNS queries (override AUDIT from regex rules)
+- id: allow-dns-safe
+  match:
+    semantic:
+      intent: "dns-query-safe"
+  decision: "ALLOW"
+  reason: "DMARC/SPF/DKIM DNS lookups are safe."
+```
+
+### Stateful Match
+
+Stateful rules match **multi-step attack chains** within compound commands. Each step in the chain matches a command segment, and the chain is matched as a subsequence.
+
+**When to use stateful:**
+- Download-then-execute chains (`curl -o x.sh && bash x.sh`)
+- Reconnaissance-archive-exfiltrate sequences
+- Any multi-command attack pattern connected by `&&`, `||`, `;`
+
+#### Stateful Match Schema
+
+```yaml
+stateful:
+  chain:                              # ordered sequence of steps
+    - executable_any: ["curl", "wget"]
+      flags_any: ["o", "O"]          # step must have output flag
+    - executable_any: ["bash", "sh"]  # next step is execution
+  negate: false
+```
+
+Each `chain` step supports:
+- **`executable_any`** — segment executable is one of these
+- **`flags_any`** — segment has at least one of these flags
+- **`args_any`** — any positional arg matches glob
+- **`operator`** — operator connecting to next step (`&&`, `||`, `;`, `|`)
+
+#### Stateful Rule Examples
+
+```yaml
+# Block download → execute chains
+- id: block-download-execute
+  match:
+    stateful:
+      chain:
+        - executable_any: ["curl", "wget", "aria2c"]
+          flags_any: ["o", "O", "output"]
+        - executable_any: ["bash", "sh", "chmod", "python3"]
+  decision: "BLOCK"
+  reason: "Download-then-execute chain detected."
+
+# Block recon → archive → exfiltrate
+- id: block-recon-exfil
+  match:
+    stateful:
+      chain:
+        - executable_any: ["find", "locate", "ls"]
+        - executable_any: ["tar", "zip", "gzip"]
+        - executable_any: ["curl", "wget", "nc", "scp"]
+  decision: "BLOCK"
+  reason: "Reconnaissance → archive → exfiltrate chain."
+```
+
 ### Protected Paths
 
 Protected paths block **any command** that accesses matching file paths, regardless of rules:

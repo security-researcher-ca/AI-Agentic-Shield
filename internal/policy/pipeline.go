@@ -14,10 +14,12 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 	}
 
 	// Convert policy rules to analyzer-side types.
-	// Rules with regex/prefix/exact go to the RegexAnalyzer.
-	// Rules with structural match go to the StructuralAnalyzer.
+	// Each rule goes to the analyzer matching its match type.
 	var regexRules []analyzer.RegexRule
 	var structuralRules []analyzer.StructuralRule
+	var dataflowRules []analyzer.DataflowRule
+	var semanticRules []analyzer.UserSemanticRule
+	var statefulRules []analyzer.StatefulRule
 
 	for _, r := range pol.Rules {
 		// Regex/prefix/exact match → RegexAnalyzer
@@ -34,9 +36,24 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 			})
 		}
 
-		// Structural match → StructuralAnalyzer (user-defined YAML rules)
+		// Structural match → StructuralAnalyzer
 		if r.Match.Structural != nil {
 			structuralRules = append(structuralRules, convertStructuralRule(r))
+		}
+
+		// Dataflow match → DataflowAnalyzer
+		if r.Match.Dataflow != nil {
+			dataflowRules = append(dataflowRules, convertDataflowRule(r))
+		}
+
+		// Semantic match → SemanticAnalyzer
+		if r.Match.Semantic != nil {
+			semanticRules = append(semanticRules, convertSemanticRule(r))
+		}
+
+		// Stateful match → StatefulAnalyzer
+		if r.Match.Stateful != nil {
+			statefulRules = append(statefulRules, convertStatefulRule(r))
 		}
 	}
 
@@ -44,8 +61,11 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 	structural := analyzer.NewStructuralAnalyzer(maxParseDepth)
 	structural.SetUserRules(structuralRules)
 	semantic := analyzer.NewSemanticAnalyzer()
+	semantic.SetUserRules(semanticRules)
 	dataflow := analyzer.NewDataflowAnalyzer()
+	dataflow.SetUserRules(dataflowRules)
 	stateful := analyzer.NewStatefulAnalyzer(nil) // nil = compound-command-only mode
+	stateful.SetUserRules(statefulRules)
 	guard := guardian.NewGuardianAnalyzer(guardian.NewHeuristicProvider())
 
 	return analyzer.NewRegistry(
@@ -74,6 +94,72 @@ func convertStructuralRule(r Rule) analyzer.StructuralRule {
 		HasPipe:    sm.HasPipe,
 		PipeTo:     sm.PipeTo,
 		PipeFrom:   sm.PipeFrom,
+		Negate:     sm.Negate,
+	}
+}
+
+// convertDataflowRule converts a policy.Rule with a DataflowMatch into
+// an analyzer.DataflowRule.
+func convertDataflowRule(r Rule) analyzer.DataflowRule {
+	dm := r.Match.Dataflow
+	return analyzer.DataflowRule{
+		ID:         r.ID,
+		Decision:   string(r.Decision),
+		Confidence: r.Confidence,
+		Reason:     r.Reason,
+		Taxonomy:   r.Taxonomy,
+		Source: analyzer.DataflowRuleEndpoint{
+			Type:     dm.Source.Type,
+			Paths:    dm.Source.Paths,
+			Commands: dm.Source.Commands,
+		},
+		Sink: analyzer.DataflowRuleEndpoint{
+			Type:     dm.Sink.Type,
+			Paths:    dm.Sink.Paths,
+			Commands: dm.Sink.Commands,
+		},
+		Via:    dm.Via,
+		Negate: dm.Negate,
+	}
+}
+
+// convertSemanticRule converts a policy.Rule with a SemanticMatch into
+// an analyzer.UserSemanticRule.
+func convertSemanticRule(r Rule) analyzer.UserSemanticRule {
+	sm := r.Match.Semantic
+	return analyzer.UserSemanticRule{
+		ID:         r.ID,
+		Decision:   string(r.Decision),
+		Confidence: r.Confidence,
+		Reason:     r.Reason,
+		Taxonomy:   r.Taxonomy,
+		Intent:     sm.Intent,
+		IntentAny:  sm.IntentAny,
+		RiskMin:    sm.RiskMin,
+		Negate:     sm.Negate,
+	}
+}
+
+// convertStatefulRule converts a policy.Rule with a StatefulMatch into
+// an analyzer.StatefulRule.
+func convertStatefulRule(r Rule) analyzer.StatefulRule {
+	sm := r.Match.Stateful
+	chain := make([]analyzer.ChainStepRule, len(sm.Chain))
+	for i, step := range sm.Chain {
+		chain[i] = analyzer.ChainStepRule{
+			ExecutableAny: step.ExecutableAny,
+			FlagsAny:      step.FlagsAny,
+			ArgsAny:       step.ArgsAny,
+			Operator:      step.Operator,
+		}
+	}
+	return analyzer.StatefulRule{
+		ID:         r.ID,
+		Decision:   string(r.Decision),
+		Confidence: r.Confidence,
+		Reason:     r.Reason,
+		Taxonomy:   r.Taxonomy,
+		Chain:      chain,
 		Negate:     sm.Negate,
 	}
 }

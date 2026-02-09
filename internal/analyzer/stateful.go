@@ -12,7 +12,8 @@ import (
 // falls back to detecting multi-step patterns within a single compound
 // command (e.g., "curl -o x.sh && bash x.sh").
 type StatefulAnalyzer struct {
-	store SessionStore // optional: nil means compound-command-only mode
+	store     SessionStore   // optional: nil means compound-command-only mode
+	userRules []StatefulRule // user-defined YAML stateful rules
 }
 
 // NewStatefulAnalyzer creates a stateful analyzer.
@@ -21,12 +22,18 @@ func NewStatefulAnalyzer(store SessionStore) *StatefulAnalyzer {
 	return &StatefulAnalyzer{store: store}
 }
 
+// SetUserRules attaches user-defined stateful rules from YAML packs.
+func (s *StatefulAnalyzer) SetUserRules(rules []StatefulRule) {
+	s.userRules = rules
+}
+
 func (s *StatefulAnalyzer) Name() string { return "stateful" }
 
 // Analyze checks for multi-step attack patterns.
 func (s *StatefulAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 	var findings []Finding
 
+	// 1. Run built-in Go checks
 	// Check compound commands within this single evaluation
 	// (e.g., "curl -o x.sh && bash x.sh")
 	findings = append(findings, s.checkCompoundDownloadExecute(ctx)...)
@@ -34,6 +41,26 @@ func (s *StatefulAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 	// If a session store is available, check cross-command patterns
 	if s.store != nil {
 		findings = append(findings, s.checkSessionPatterns(ctx)...)
+	}
+
+	// 2. Run user-defined YAML stateful rules
+	if ctx.Parsed != nil {
+		for _, rule := range s.userRules {
+			if MatchStatefulRule(ctx.Parsed, rule) {
+				f := Finding{
+					AnalyzerName: "stateful",
+					RuleID:       rule.ID,
+					Decision:     rule.Decision,
+					Confidence:   rule.Confidence,
+					Reason:       rule.Reason,
+					TaxonomyRef:  rule.Taxonomy,
+				}
+				if f.Confidence == 0 {
+					f.Confidence = 0.85
+				}
+				findings = append(findings, f)
+			}
+		}
 	}
 
 	return findings
