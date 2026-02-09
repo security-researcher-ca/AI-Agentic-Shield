@@ -389,27 +389,21 @@ sequenceDiagram
 ##### Installation Steps:
 
 ```bash
-# 1. Build and install AgentShield
-go build -o agentshield cmd/agentshield/main.go
-sudo cp agentshield /usr/local/bin/
+# 1. Install via Homebrew (recommended)
+brew tap gzhole/tap
+brew install agentshield
 
-# 2. Create the wrapper script
-sudo mkdir -p /usr/local/lib/agentshield
-sudo tee /usr/local/lib/agentshield/agent-wrapper.sh << 'EOF'
-#!/bin/bash
-/usr/local/bin/agentshield run -- "$@"
-EOF
-sudo chmod +x /usr/local/lib/agentshield/agent-wrapper.sh
+# 2. Run setup to install wrapper + policy packs
+agentshield setup --install
 
-# 3. Configure the AI agent to use the wrapper
-# Method 1: Set the agent's shell
-export AGENT_SHELL="/usr/local/lib/agentshield/agent-wrapper.sh"
-
-# Method 2: For Python subprocess calls
-export PYTHON_AGENT_WRAPPER="/usr/local/lib/agentshield/agent-wrapper.sh"
-
-# Method 3: Modify the agent's configuration
-# In agent config: "shell": "/usr/local/lib/agentshield/agent-wrapper.sh"
+# 3. Configure the AI agent to use the wrapper as its shell
+#    The wrapper path is: $(brew --prefix)/share/agentshield/agentshield-wrapper.sh
+#
+#    Windsurf/Cursor: Settings → Agent → Shell path
+#    Claude Code:     "shell": "$(brew --prefix)/share/agentshield/agentshield-wrapper.sh"
+#
+# Or view full integration guide:
+agentshield setup
 ```
 
 ##### Integration with Popular AI Frameworks:
