@@ -13,6 +13,131 @@ AI coding agents (Windsurf, Claude Code, OpenClaw, Cursor, etc.) execute shell c
 
 AgentShield sits between the agent and the OS, enforcing **deterministic policy rules** and logging every action.
 
+## How It Works
+
+AgentShield is a **command wrapper** — it evaluates every command *before* execution and only runs it if the policy allows.
+
+```
+Agent wants to run: cat ~/.ssh/id_rsa
+
+┌─────────────────────────────────────────────────────┐
+│  agentshield run -- cat ~/.ssh/id_rsa               │
+│                                                     │
+│  1. Receive command string (cat never runs yet)     │
+│  2. Normalize paths (~/.ssh/id_rsa → /home/u/.ssh/) │
+│  3. Check protected paths → MATCH: ~/.ssh/**        │
+│  4. Run 6-layer analyzer pipeline (if no early exit)│
+│  5. Decision: BLOCK                                 │
+│  6. Print error, exit(1) — cat NEVER executes       │
+└─────────────────────────────────────────────────────┘
+```
+
+The critical point: **the dangerous command never runs**. AgentShield receives the command as a string argument, evaluates it through the policy engine, and only calls the real binary (`exec.Command`) if the decision is `ALLOW` or `AUDIT`. On `BLOCK`, it exits immediately with a non-zero exit code.
+
+### Decision Flow
+
+| Decision | What happens |
+|----------|-------------|
+| `ALLOW` | Execute the command, log normally |
+| `AUDIT` | Execute the command, flag in audit log for review |
+| `BLOCK` | **Do not execute.** Print explanation to stderr, log, exit with code 1 |
+
+### What AgentShield Is NOT
+
+- **Not a kernel-level interceptor** — it doesn't hook syscalls or use eBPF
+- **Not a firewall** — it doesn't monitor network traffic
+- **Not an LLM guardrail** — it doesn't filter prompts sent to models
+
+It is a **deterministic policy gate** that wraps command execution. If a command doesn't go through `agentshield run --`, it isn't intercepted. This is by design — the enforcement boundary is explicit and auditable.
+
+## Agent vs Human: Who Gets Intercepted?
+
+AgentShield **does not magically distinguish** between agent and human commands. The distinction comes from **deployment**:
+
+| Scenario | How it works |
+|----------|-------------|
+| **Agent commands intercepted** | Configure the AI agent's shell/executor to route through AgentShield (see [Agent Integration](#agent-integration)) |
+| **Human commands unintercepted** | Humans use their normal shell — no AgentShield in the path |
+| **Both intercepted** | Source the shell wrapper in `.zshrc` — every command goes through AgentShield |
+
+The recommended deployment: **put AgentShield in the agent's execution path only**. Humans retain full shell access; agents are governed.
+
+## Agent Integration
+
+### Method 1: Shell Wrapper (Recommended for IDE Agents)
+
+Most AI coding agents (Windsurf, Claude Code, Cursor, etc.) spawn a shell to execute commands. Configure the agent to use AgentShield's wrapper shell:
+
+```bash
+# Install the wrapper
+sudo cp scripts/agentshield-wrapper.sh /usr/local/share/agentshield/
+
+# Configure your IDE agent to use this as its shell:
+#   Shell path: /bin/zsh
+#   Shell args: -c "source /usr/local/share/agentshield/agentshield-wrapper.sh && eval \"$@\""
+#
+# Or set the agent's shell environment variable (agent-specific):
+export AGENT_SHELL="source /usr/local/share/agentshield/agentshield-wrapper.sh"
+```
+
+When the wrapper is loaded, every command the agent runs is routed through `agentshield run --` automatically. The wrapper skips shell builtins (`cd`, `export`, etc.) to avoid breaking normal shell behavior.
+
+### Method 2: Direct CLI Wrapping (For Agent Frameworks)
+
+If you control the agent's code (LangChain, AutoGen, CrewAI, custom agents), replace the shell execution call:
+
+```python
+# Before (unprotected):
+import subprocess
+result = subprocess.run(["cat", "/etc/passwd"], capture_output=True)
+
+# After (protected):
+result = subprocess.run(
+    ["agentshield", "run", "--", "cat", "/etc/passwd"],
+    capture_output=True
+)
+# If BLOCK: exit code 1, stderr has explanation
+# If ALLOW/AUDIT: stdout/stderr from the real command
+```
+
+```go
+// Go example
+cmd := exec.Command("agentshield", "run", "--", "cat", "/etc/passwd")
+```
+
+### Method 3: PATH Interception (For Maximum Coverage)
+
+Create command-specific interceptors that shadow system binaries:
+
+```bash
+# Create interceptor directory
+sudo mkdir -p /usr/local/lib/agentshield/bin
+
+# Create interceptors for dangerous commands
+for cmd in rm git curl wget ssh scp; do
+  cat > "/usr/local/lib/agentshield/bin/$cmd" << 'EOF'
+#!/bin/sh
+exec agentshield run -- /usr/bin/$cmd "$@"
+EOF
+  chmod +x "/usr/local/lib/agentshield/bin/$cmd"
+done
+
+# Prepend to the agent's PATH (not your own shell)
+export PATH="/usr/local/lib/agentshield/bin:$PATH"
+```
+
+### Bypass for Humans
+
+If you source the wrapper globally but want to bypass for interactive use:
+
+```bash
+# Temporarily disable
+export AGENTSHIELD_BYPASS=1
+
+# Re-enable
+unset AGENTSHIELD_BYPASS
+```
+
 ## Install
 
 ```bash
@@ -88,14 +213,6 @@ $ agentshield log --summary
   BLOCK:           2
 ═══════════════════════════════════════════
 ```
-
-## Decisions
-
-| Decision | Behavior |
-|----------|----------|
-| `ALLOW` | Execute, log normally |
-| `AUDIT` | Execute, flag in log for review |
-| `BLOCK` | Deny with explanation, log |
 
 ## Configuration
 
@@ -264,7 +381,7 @@ flowchart TB
         direction TB
         Unicode["Unicode\nSmuggling\nDetection"]
         Norm["Command\nNormalization"]
-        Pipeline["Analyzer Pipeline\n(regex → structural → semantic)"]
+        Pipeline["Analyzer Pipeline\n(6-layer: regex → structural →\nsemantic → dataflow → stateful → guardian)"]
         Policy["Policy Engine\n(rule priority + packs)"]
         Redact["Secret\nRedaction"]
 
@@ -280,14 +397,15 @@ flowchart TB
 flowchart LR
     Cmd["Raw Command"]
 
-    subgraph Registry["Analyzer Registry (5 layers)"]
+    subgraph Registry["Analyzer Registry (6 layers)"]
         direction LR
         R["Layer 1:\nRegex"]
         S["Layer 2:\nStructural"]
         Sem["Layer 3:\nSemantic"]
         DF["Layer 4:\nDataflow"]
         SF["Layer 5:\nStateful"]
-        R --> S --> Sem --> DF --> SF
+        G["Layer 6:\nGuardian"]
+        R --> S --> Sem --> DF --> SF --> G
     end
 
     Cmd --> Registry
@@ -355,11 +473,11 @@ flowchart TD
 | Package | Purpose |
 |---------|----------|
 | `internal/policy` | Policy engine, rule loading, pack merging |
-| `internal/analyzer` | Multi-layer analyzer pipeline (regex, structural, semantic) |
+| `internal/analyzer` | Multi-layer analyzer pipeline (regex, structural, semantic, dataflow, stateful) |
+| `internal/guardian` | Prompt injection detection (9 heuristic signals) |
 | `internal/taxonomy` | Security taxonomy loader and compliance mapping |
 | `internal/unicode` | Unicode smuggling detection |
 | `internal/redact` | Secret redaction for audit logs |
-| `internal/sandbox` | Process sandboxing and execution |
 
 ## License
 
