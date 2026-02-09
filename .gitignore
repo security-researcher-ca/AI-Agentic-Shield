@@ -5,3 +5,8 @@ dist/
 # Auto-generated test reports
 FAILING_TESTS.md
 REDTEAM_REPORT.md
+
+# Private documents (not for public repo)
+Design/
+plans/
+PRD/
