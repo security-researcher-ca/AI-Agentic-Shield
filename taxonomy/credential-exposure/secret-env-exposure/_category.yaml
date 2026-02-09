@@ -1,0 +1,6 @@
+id: "2.3"
+name: "Secret Environment Exposure"
+kingdom_id: 2
+description: >
+  Commands that dump or query environment variables containing secrets
+  such as API keys, tokens, passwords, and cloud credentials.

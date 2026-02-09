@@ -19,18 +19,21 @@ network:
 rules:
   # === BLOCK: Reverse shell tools ===
   - id: "ne-block-netcat"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
     match:
       command_regex: "^(nc|ncat|netcat|socat)\\s"
     decision: "BLOCK"
     reason: "Netcat/socat can open reverse shells or exfiltrate data."
 
   - id: "ne-block-telnet"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
     match:
       command_prefix: ["telnet "]
     decision: "BLOCK"
     reason: "Telnet is unencrypted and commonly used for reverse shells."
 
   - id: "ne-block-dev-tcp"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
     match:
       command_regex: "/dev/(tcp|udp)/"
     decision: "BLOCK"
@@ -38,6 +41,7 @@ rules:
 
   # === BLOCK: DNS tunneling indicators ===
   - id: "ne-block-dns-tunnel"
+    taxonomy: "data-exfiltration/network-egress/dns-tunneling"
     match:
       command_regex: "(dig|nslookup|host)\\s+.*TXT\\s"
     decision: "BLOCK"

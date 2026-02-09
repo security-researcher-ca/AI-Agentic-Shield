@@ -70,7 +70,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "warning: failed to load packs: %v\n", err)
 	}
 
-	engine, err := policy.NewEngine(pol)
+	engine, err := policy.NewEngineWithAnalyzers(pol, cfg.Analyzer.MaxParseDepth)
 	if err != nil {
 		return fmt.Errorf("failed to create policy engine: %w", err)
 	}

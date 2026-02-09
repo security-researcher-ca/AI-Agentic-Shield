@@ -16,6 +16,26 @@ type Config struct {
 	LogPath    string
 	Mode       string
 	ConfigDir  string
+	Analyzer   AnalyzerConfig
+}
+
+// AnalyzerConfig controls the multi-layer analyzer pipeline.
+type AnalyzerConfig struct {
+	// EnabledAnalyzers lists which analyzers to run. Default: ["regex", "structural", "semantic"].
+	EnabledAnalyzers []string
+	// CombineStrategy controls how findings are merged. Default: "most_restrictive".
+	CombineStrategy string
+	// MaxParseDepth controls indirect execution parsing depth. Default: 2.
+	MaxParseDepth int
+}
+
+// DefaultAnalyzerConfig returns the default analyzer configuration.
+func DefaultAnalyzerConfig() AnalyzerConfig {
+	return AnalyzerConfig{
+		EnabledAnalyzers: []string{"regex", "structural", "semantic"},
+		CombineStrategy:  "most_restrictive",
+		MaxParseDepth:    2,
+	}
 }
 
 func Load(policyPath, logPath, mode string) (*Config, error) {
@@ -33,6 +53,7 @@ func Load(policyPath, logPath, mode string) (*Config, error) {
 	cfg := &Config{
 		ConfigDir: configDir,
 		Mode:      mode,
+		Analyzer:  DefaultAnalyzerConfig(),
 	}
 
 	if policyPath != "" {
