@@ -13,23 +13,36 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 		maxParseDepth = 2
 	}
 
-	// Convert policy rules to analyzer.RegexRule
-	regexRules := make([]analyzer.RegexRule, 0, len(pol.Rules))
+	// Convert policy rules to analyzer-side types.
+	// Rules with regex/prefix/exact go to the RegexAnalyzer.
+	// Rules with structural match go to the StructuralAnalyzer.
+	var regexRules []analyzer.RegexRule
+	var structuralRules []analyzer.StructuralRule
+
 	for _, r := range pol.Rules {
-		regexRules = append(regexRules, analyzer.RegexRule{
-			ID:         r.ID,
-			Decision:   string(r.Decision),
-			Confidence: r.Confidence,
-			Reason:     r.Reason,
-			Taxonomy:   r.Taxonomy,
-			Exact:      r.Match.CommandExact,
-			Prefixes:   r.Match.CommandPrefix,
-			Regex:      r.Match.CommandRegex,
-		})
+		// Regex/prefix/exact match → RegexAnalyzer
+		if r.Match.CommandExact != "" || len(r.Match.CommandPrefix) > 0 || r.Match.CommandRegex != "" {
+			regexRules = append(regexRules, analyzer.RegexRule{
+				ID:         r.ID,
+				Decision:   string(r.Decision),
+				Confidence: r.Confidence,
+				Reason:     r.Reason,
+				Taxonomy:   r.Taxonomy,
+				Exact:      r.Match.CommandExact,
+				Prefixes:   r.Match.CommandPrefix,
+				Regex:      r.Match.CommandRegex,
+			})
+		}
+
+		// Structural match → StructuralAnalyzer (user-defined YAML rules)
+		if r.Match.Structural != nil {
+			structuralRules = append(structuralRules, convertStructuralRule(r))
+		}
 	}
 
 	regex := analyzer.NewRegexAnalyzer(regexRules)
 	structural := analyzer.NewStructuralAnalyzer(maxParseDepth)
+	structural.SetUserRules(structuralRules)
 	semantic := analyzer.NewSemanticAnalyzer()
 	dataflow := analyzer.NewDataflowAnalyzer()
 	stateful := analyzer.NewStatefulAnalyzer(nil) // nil = compound-command-only mode
@@ -39,6 +52,30 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 		[]analyzer.Analyzer{regex, structural, semantic, dataflow, stateful, guard},
 		analyzer.NewCombiner(analyzer.StrategyMostRestrictive),
 	)
+}
+
+// convertStructuralRule converts a policy.Rule with a StructuralMatch into
+// an analyzer.StructuralRule (crossing the package boundary without import cycles).
+func convertStructuralRule(r Rule) analyzer.StructuralRule {
+	sm := r.Match.Structural
+	return analyzer.StructuralRule{
+		ID:         r.ID,
+		Decision:   string(r.Decision),
+		Confidence: r.Confidence,
+		Reason:     r.Reason,
+		Taxonomy:   r.Taxonomy,
+		Executable: []string(sm.Executable),
+		SubCommand: sm.SubCommand,
+		FlagsAll:   sm.FlagsAll,
+		FlagsAny:   sm.FlagsAny,
+		FlagsNone:  sm.FlagsNone,
+		ArgsAny:    sm.ArgsAny,
+		ArgsNone:   sm.ArgsNone,
+		HasPipe:    sm.HasPipe,
+		PipeTo:     sm.PipeTo,
+		PipeFrom:   sm.PipeFrom,
+		Negate:     sm.Negate,
+	}
 }
 
 // NewEngineWithAnalyzers creates an engine with the full analyzer pipeline enabled.

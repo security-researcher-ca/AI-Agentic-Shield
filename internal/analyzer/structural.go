@@ -13,6 +13,7 @@ import (
 type StructuralAnalyzer struct {
 	maxParseDepth int
 	checks        []StructuralCheck
+	userRules     []StructuralRule // user-defined YAML structural rules
 }
 
 // StructuralCheck is a single structural detection rule implemented in Go.
@@ -45,14 +46,41 @@ func (a *StructuralAnalyzer) Name() string { return "structural" }
 
 // Analyze parses the command into an AST and runs structural checks.
 // It enriches ctx.Parsed for downstream analyzers to consume.
+// SetUserRules attaches user-defined structural rules from YAML packs.
+// These are evaluated after built-in Go checks, using the same ParsedCommand.
+func (a *StructuralAnalyzer) SetUserRules(rules []StructuralRule) {
+	a.userRules = rules
+}
+
 func (a *StructuralAnalyzer) Analyze(ctx *AnalysisContext) []Finding {
 	parsed := a.Parse(ctx.RawCommand)
 	ctx.Parsed = parsed
 
 	var findings []Finding
+
+	// 1. Run built-in Go checks (hardcoded detection rules)
 	for _, check := range a.checks {
 		findings = append(findings, check.Check(parsed, ctx.RawCommand)...)
 	}
+
+	// 2. Run user-defined YAML structural rules against the parsed AST
+	for _, rule := range a.userRules {
+		if MatchStructuralRule(parsed, rule) {
+			f := Finding{
+				AnalyzerName: "structural",
+				RuleID:       rule.ID,
+				Decision:     rule.Decision,
+				Confidence:   rule.Confidence,
+				Reason:       rule.Reason,
+				TaxonomyRef:  rule.Taxonomy,
+			}
+			if f.Confidence == 0 {
+				f.Confidence = 0.85 // structural rules are more precise than regex
+			}
+			findings = append(findings, f)
+		}
+	}
+
 	return findings
 }
 
