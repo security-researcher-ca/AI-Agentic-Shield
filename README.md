@@ -149,12 +149,12 @@ rules:
 - **Fail-safe** — Unknown commands default to AUDIT, not ALLOW
 - **Audit trail** — Every decision logged with timestamp, rule, and reason
 - **Agent-agnostic** — Works with Windsurf, OpenClaw, Claude Code, or any shell-based agent
-- **Multi-layer analysis** — Regex + Structural + Semantic analyzers for defense-in-depth
+- **Multi-layer analysis** — 6-layer pipeline (Regex + Structural + Semantic + Dataflow + Stateful + Guardian) for defense-in-depth
 - **Unicode smuggling detection** — Blocks homoglyphs, zero-width characters, and bidirectional overrides
 
 ## Multi-Layer Analyzer Pipeline
 
-AgentShield uses a five-layer analyzer pipeline for defense-in-depth command analysis. See [Architecture](#analyzer-pipeline-flow) for the full Mermaid diagram.
+AgentShield uses a six-layer analyzer pipeline for defense-in-depth command analysis. See [Architecture](#analyzer-pipeline-flow) for the full Mermaid diagram.
 
 | Layer | What it does | Example |
 |-------|-------------|----------|
@@ -163,6 +163,7 @@ AgentShield uses a five-layer analyzer pipeline for defense-in-depth command ana
 | **Semantic** | Intent classification from parsed command structure | `shred /dev/sda` → destructive disk operation |
 | **Dataflow** | Source→sink taint tracking through pipes/redirects | `cat /dev/zero > /dev/sda` → zero source to device sink |
 | **Stateful** | Multi-step attack chain detection | `curl -o x.sh && bash x.sh` → download-then-execute |
+| **Guardian** | Prompt injection signals, obfuscation, inline secrets | `echo "ignore previous instructions"` → instruction_override |
 | **Combiner** | Merges findings using most-restrictive-wins strategy | BLOCK from any layer overrides AUDIT |
 
 ### What each layer catches
@@ -172,12 +173,13 @@ AgentShield uses a five-layer analyzer pipeline for defense-in-depth command ana
 - **Semantic adds**: Alternative destructive tools (`shred`, `wipefs`, `find -delete`), indirect execution (`python3 -c "shutil.rmtree('/')"`, fork bombs), crontab modification, environment dumps via scripting languages
 - **Dataflow adds**: Redirect-based disk destruction (`cat /dev/zero > /dev/sda`), direct cron spool writes, sensitive data piped to network commands, command substitution exfiltration
 - **Stateful adds**: Download-then-execute chains (`curl -o x.sh && bash x.sh`), three-step download→chmod→execute sequences
+- **Guardian adds**: Prompt injection detection (`ignore previous instructions`), security bypass attempts, obfuscated payloads (base64/hex), inline secrets (API keys, tokens), bulk exfiltration (archive + upload), indirect injection (`SYSTEM:`, `[INST]` tags)
 
 ## Accuracy Baseline
 
 Measured across 123 test cases covering 8 threat kingdoms (destructive ops, credential exposure, data exfiltration, unauthorized execution, privilege escalation, persistence/evasion, supply chain, reconnaissance).
 
-| Metric | Regex Only | Pipeline (5-layer) | Improvement |
+| Metric | Regex Only | Pipeline (6-layer) | Improvement |
 |--------|-----------|--------------------------------------|-------------|
 | **Precision** | 79.3% | 100.0% | +20.7pp |
 | **Recall** | 59.0% | 96.2% | +37.2pp |
@@ -200,6 +202,16 @@ See [`FAILING_TESTS.md`](FAILING_TESTS.md) for the full prioritized list with de
 
 ```bash
 go test -v -run TestGenerateFailingTestsReport ./internal/analyzer/
+```
+
+### Red-Team Regression (21 commands)
+
+The guardian + pipeline is tested against prompt injection scenarios adapted from the [PRD red-team pack](PRD/agentshield_redteam_prompt_pack.md). All 21 commands pass minimum decision checks.
+
+See [`REDTEAM_REPORT.md`](REDTEAM_REPORT.md) for the full report. Regenerate:
+
+```bash
+go test -v -run TestRedTeamPipelineReport ./internal/analyzer/
 ```
 
 ## Agent Action Security Taxonomy

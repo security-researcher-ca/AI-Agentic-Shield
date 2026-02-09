@@ -2,6 +2,7 @@ package policy
 
 import (
 	"github.com/gzhole/agentshield/internal/analyzer"
+	"github.com/gzhole/agentshield/internal/guardian"
 )
 
 // BuildAnalyzerPipeline creates a full analyzer registry from the engine's policy rules.
@@ -32,9 +33,10 @@ func BuildAnalyzerPipeline(pol *Policy, maxParseDepth int) *analyzer.Registry {
 	semantic := analyzer.NewSemanticAnalyzer()
 	dataflow := analyzer.NewDataflowAnalyzer()
 	stateful := analyzer.NewStatefulAnalyzer(nil) // nil = compound-command-only mode
+	guard := guardian.NewGuardianAnalyzer(guardian.NewHeuristicProvider())
 
 	return analyzer.NewRegistry(
-		[]analyzer.Analyzer{regex, structural, semantic, dataflow, stateful},
+		[]analyzer.Analyzer{regex, structural, semantic, dataflow, stateful, guard},
 		analyzer.NewCombiner(analyzer.StrategyMostRestrictive),
 	)
 }
