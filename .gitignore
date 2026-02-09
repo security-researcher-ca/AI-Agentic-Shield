@@ -1,1 +1,7 @@
 local/
+build/
+dist/
+
+# Auto-generated test reports
+FAILING_TESTS.md
+REDTEAM_REPORT.md
