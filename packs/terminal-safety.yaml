@@ -152,3 +152,49 @@ rules:
         - "git stash list"
     decision: "ALLOW"
     reason: "Read-only or informational command."
+
+  # === STRUCTURAL RULES ===
+  # These use the parsed shell AST instead of regex.
+  # They handle flag reordering, long-form flags, and sudo automatically.
+
+  - id: "ts-struct-block-rm-system"
+    taxonomy: "destructive-ops/fs-destruction/system-directory-delete"
+    match:
+      structural:
+        executable: "rm"
+        flags_all: ["r", "f"]
+        args_any: ["/", "/etc/**", "/usr/**", "/var/**", "/boot/**", "/sys/**"]
+    decision: "BLOCK"
+    confidence: 0.95
+    reason: "Structural: recursive force-delete on system directory (handles flag reordering and sudo)."
+
+  - id: "ts-struct-block-chmod-world-writable"
+    taxonomy: "destructive-ops/permission-weakening/chmod-world-writable"
+    match:
+      structural:
+        executable: "chmod"
+        args_any: ["/etc/**", "/usr/**", "/var/**"]
+    decision: "AUDIT"
+    confidence: 0.80
+    reason: "Structural: chmod on system directory flagged for review."
+
+  - id: "ts-struct-block-pipe-to-shell"
+    taxonomy: "unauthorized-execution/remote-code-exec/pipe-to-shell"
+    match:
+      structural:
+        pipe_from: ["curl", "wget", "fetch", "aria2c"]
+        pipe_to: ["sh", "bash", "zsh", "dash", "python", "python3", "node", "ruby", "perl"]
+    decision: "BLOCK"
+    confidence: 0.95
+    reason: "Structural: download piped to interpreter. Download and inspect first."
+
+  - id: "ts-struct-block-npm-registry"
+    taxonomy: "supply-chain/dependency-confusion/non-standard-registry"
+    match:
+      structural:
+        executable: ["npm", "yarn", "pnpm"]
+        subcommand: "install"
+        flags_any: ["registry"]
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Structural: package install with custom registry override is a supply chain risk."

@@ -52,8 +52,9 @@ rules:
 | `command_exact` | Exact string match | Specific commands: `"rm -rf /"` |
 | `command_prefix` | Starts-with match (list) | Command families: `["npm install", "pip install"]` |
 | `command_regex` | Regular expression | Complex patterns with flags/args |
+| **`structural`** | **Shell AST match** | **Flag-agnostic, sudo-transparent, pipe-aware rules** |
 
-**Examples:**
+### Regex Match Examples
 
 ```yaml
 # Exact match — blocks only this precise command
@@ -76,6 +77,103 @@ rules:
     command_regex: "^(sudo\\s+)?rm\\s+.*-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\\s+(/etc|/usr|/var)"
   decision: "BLOCK"
   reason: "Recursive force-remove on critical system directory."
+```
+
+### Structural Match (Recommended)
+
+Structural rules match against the **parsed shell AST** instead of raw strings. They are more robust than regex because they handle flag reordering, long-form flags, and sudo wrapping automatically.
+
+**When to use structural instead of regex:**
+
+| Scenario | Regex problem | Structural solution |
+|----------|--------------|-------------------|
+| `rm -rf /` vs `rm --recursive --force /` | Need complex regex for all flag variants | `flags_all: ["r", "f"]` handles both |
+| `sudo rm -rf /` | Need `(sudo\s+)?` prefix in every regex | Sudo is stripped automatically |
+| `curl ... \| bash` vs `wget ... \| python3` | Enumerate all combinations | `pipe_from` + `pipe_to` lists |
+| `npm install --registry evil.com` | Regex can't reliably parse `--registry` | `flags_any: ["registry"]` |
+
+#### Structural Match Schema
+
+```yaml
+structural:
+  # --- Command identification ---
+  executable: "rm"                    # exact match (string or list)
+  subcommand: "install"               # for npm/pip/git subcommands
+
+  # --- Flag predicates ---
+  flags_all: ["r", "f"]              # must have ALL (short or long form)
+  flags_any: ["r", "recursive", "R"] # must have at least ONE
+  flags_none: ["dry-run", "n"]       # must NOT have any of these
+
+  # --- Argument predicates (glob patterns) ---
+  args_any: ["/", "/etc/**"]         # any positional arg matches any glob
+  args_none: ["--help"]              # no arg matches any of these
+
+  # --- Pipe analysis ---
+  has_pipe: true                      # command contains a pipe operator
+  pipe_to: ["sh", "bash", "python3"] # RHS of pipe is one of these
+  pipe_from: ["curl", "wget"]        # LHS of pipe is one of these
+
+  # --- Modifiers ---
+  negate: false                       # invert match (for ALLOW overrides)
+```
+
+#### Flag Aliases
+
+Structural rules automatically resolve common short↔long flag aliases:
+
+| Write this | Also matches |
+|-----------|-------------|
+| `"r"` | `--recursive`, `-R` |
+| `"f"` | `--force` |
+| `"v"` | `--verbose` |
+| `"n"` | `--dry-run` |
+| `"o"` | `--output` |
+
+#### Structural Rule Examples
+
+```yaml
+# Block rm -rf on system directories (handles ALL flag orderings + sudo)
+- id: block-rm-system
+  match:
+    structural:
+      executable: "rm"
+      flags_all: ["r", "f"]
+      args_any: ["/", "/etc/**", "/usr/**", "/var/**"]
+  decision: "BLOCK"
+  confidence: 0.95
+  reason: "Recursive force-delete on system directory."
+
+# Block download-piped-to-interpreter (covers all shell + language interpreters)
+- id: block-pipe-to-shell
+  match:
+    structural:
+      pipe_from: ["curl", "wget", "fetch"]
+      pipe_to: ["sh", "bash", "zsh", "python", "python3", "node", "ruby", "perl"]
+  decision: "BLOCK"
+  confidence: 0.95
+  reason: "Download piped to interpreter. Download and inspect first."
+
+# Block npm/yarn/pnpm install with custom registry (supply chain attack)
+- id: block-npm-registry-override
+  match:
+    structural:
+      executable: ["npm", "yarn", "pnpm"]
+      subcommand: "install"
+      flags_any: ["registry"]
+  decision: "BLOCK"
+  confidence: 0.90
+  reason: "Package install with custom registry is a supply chain risk."
+
+# ALLOW override: rm with --dry-run is safe
+- id: allow-rm-dry-run
+  match:
+    structural:
+      executable: "rm"
+      flags_any: ["dry-run", "n"]
+  decision: "ALLOW"
+  confidence: 0.90
+  reason: "rm with --dry-run does not actually delete files."
 ```
 
 ### Protected Paths
