@@ -179,3 +179,7 @@ make lint     # Run linter
 ## License
 
 Apache 2.0
+
+#### AI Agent Marketplace Index And Agent Router | [API Doc](https://www.deepnlp.org/doc/ai_agent_marketplace)
+    [![AI Agent Marketplace and Router Badge](https://www.deepnlp.org/api/ai_agent_marketplace/svg?name=gzhole/AI-Agentic-Shield&badge_type=review)](https://www.deepnlp.org/store/ai-agent/ai-agent/pub-gzhole/ai-agentic-shield)
+    
