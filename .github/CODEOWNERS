@@ -1,0 +1,26 @@
+# Code Owners File
+
+# Global owners - can review and approve any PR
+* @gzhole
+
+# Security team - gets notified of security issues
+.github/SECURITY.md @gzhole
+.github/ISSUE_TEMPLATE/security_vulnerability.md @gzhole
+
+# Policy and security rules
+packs/ @gzhole
+internal/policy/ @gzhole
+internal/analyzer/ @gzhole
+internal/guardian/ @gzhole
+
+# Build and release automation
+.github/workflows/ @gzhole
+.goreleaser.yaml @gzhole
+Makefile @gzhole
+
+# Documentation
+docs/ @gzhole
+README.md @gzhole
+
+# Homebrew integration
+homebrew-tap/ @gzhole
