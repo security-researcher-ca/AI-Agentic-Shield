@@ -5,10 +5,23 @@
 AI coding agents (OpenClaw, Windsurf, Cursor, Claude Code, etc.) run shell commands with real side effects.
 AgentShield sits between the agent and the OS — enforcing deterministic policies, blocking threats, and logging every action.
 
-![AgentShield enabled in OpenClaw](docs/images/openclaw-hook-setup.png)
-AgentShield enabled in OpenClaw
-![AgentShield blocking a command in Windsurf](docs/images/windsurf-hook-blocked.png)
-AgentShield blocking a command in Windsurf
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/images/openclaw-hook-setup.png" alt="AgentShield enabled in OpenClaw" />
+      <br>
+      <em>AgentShield enabled in OpenClaw</em>
+    </td>
+    <td width="50%">
+      <img src="docs/images/windsurf-hook-blocked.png" alt="AgentShield blocking a command in Windsurf" />
+      <br>
+      <em>AgentShield blocking a command in Windsurf</em>
+    </td>
+  </tr>
+</table>
+
 ## Install
 
 ```bash
