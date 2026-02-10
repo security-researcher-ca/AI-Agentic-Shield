@@ -171,7 +171,9 @@ func TestLoadCatalog_EmptyDir(t *testing.T) {
     name: "Test Kingdom"
     description: "Test"
 `
-	os.WriteFile(filepath.Join(dir, "kingdoms.yaml"), []byte(kingdomsYAML), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "kingdoms.yaml"), []byte(kingdomsYAML), 0644); err != nil {
+		t.Fatalf("Failed to write kingdoms.yaml: %v", err)
+	}
 
 	cat, err := LoadCatalog(dir)
 	if err != nil {
@@ -194,11 +196,15 @@ func TestLoadCatalog_WithEntries(t *testing.T) {
     name: "Test Kingdom"
     description: "Test"
 `
-	os.WriteFile(filepath.Join(dir, "kingdoms.yaml"), []byte(kingdomsYAML), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "kingdoms.yaml"), []byte(kingdomsYAML), 0644); err != nil {
+		t.Fatalf("Failed to write kingdoms.yaml: %v", err)
+	}
 
 	// Create kingdom dir, category dir, and entry
 	catDir := filepath.Join(dir, "test-kingdom", "test-category")
-	os.MkdirAll(catDir, 0755)
+	if err := os.MkdirAll(catDir, 0755); err != nil {
+		t.Fatalf("Failed to create category directory: %v", err)
+	}
 
 	entryYAML := `id: "test-kingdom/test-category/test-weakness"
 version: "1.0.0"
@@ -222,7 +228,9 @@ references:
 analyzers: ["regex"]
 related_rules: ["test-rule"]
 `
-	os.WriteFile(filepath.Join(catDir, "test-weakness.yaml"), []byte(entryYAML), 0644)
+	if err := os.WriteFile(filepath.Join(catDir, "test-weakness.yaml"), []byte(entryYAML), 0644); err != nil {
+		t.Fatalf("Failed to write entry file: %v", err)
+	}
 
 	cat, err := LoadCatalog(dir)
 	if err != nil {

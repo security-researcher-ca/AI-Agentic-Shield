@@ -14,8 +14,8 @@ type Catalog struct {
 	Kingdoms   []KingdomDef
 	Categories []CategoryDef
 	Entries    []TaxonomyEntry
-	ByID       map[string]TaxonomyEntry  // weakness ID → entry
-	ByKingdom  map[int][]TaxonomyEntry   // kingdom ID → entries
+	ByID       map[string]TaxonomyEntry   // weakness ID → entry
+	ByKingdom  map[int][]TaxonomyEntry    // kingdom ID → entries
 	ByCategory map[string][]TaxonomyEntry // category ID → entries
 }
 
@@ -58,6 +58,7 @@ func LoadCatalog(taxonomyDir string) (*Catalog, error) {
 		kingdomMeta := filepath.Join(kingdomDir, "_kingdom.yaml")
 		if _, err := os.Stat(kingdomMeta); err == nil {
 			// Kingdom metadata is informational; kingdoms.yaml is authoritative
+			_ = err // silence unused variable warning
 		}
 
 		// Walk category directories

@@ -18,7 +18,6 @@ type NormalizedCommand struct {
 }
 
 var (
-	urlRegex    = regexp.MustCompile(`https?://[^\s'"]+`)
 	domainRegex = regexp.MustCompile(`https?://([^/\s'"]+)`)
 )
 

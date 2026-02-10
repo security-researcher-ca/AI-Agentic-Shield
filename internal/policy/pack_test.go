@@ -215,9 +215,13 @@ rules:
     decision: "BLOCK"
     reason: "Extra"
 `
-	os.WriteFile(filepath.Join(dir, "mutation.yaml"), []byte(packYAML), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "mutation.yaml"), []byte(packYAML), 0644); err != nil {
+		t.Fatalf("Failed to write mutation.yaml: %v", err)
+	}
 
-	LoadPacks(dir, base)
+	if _, _, err := LoadPacks(dir, base); err != nil {
+		t.Fatalf("LoadPacks failed: %v", err)
+	}
 
 	// Base should be unchanged
 	if len(base.Rules) != baseRuleCount {

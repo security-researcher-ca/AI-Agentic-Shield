@@ -691,6 +691,8 @@ func TestGenerateFailingTestsReport(t *testing.T) {
 }
 
 // formatTestSummary generates a text summary for a slice of test cases.
+//
+//lint:ignore U1000 used for debugging test results
 func formatTestSummary(cases []testdata.TestCase) string {
 	tp, tn, fp, fn := 0, 0, 0, 0
 	for _, tc := range cases {

@@ -113,7 +113,7 @@ func GenerateIndexMarkdown(idx ComplianceIndex, entries map[string]TaxonomyEntry
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# %s\n\n", idx.Standard.Name))
-	sb.WriteString(fmt.Sprintf("> Auto-generated from taxonomy weakness entries. Do not edit manually.\n"))
+	sb.WriteString("> Auto-generated from taxonomy weakness entries. Do not edit manually.\n")
 	sb.WriteString(fmt.Sprintf("> Source: [%s](%s)\n\n", idx.Standard.Name, idx.Standard.URL))
 
 	// Sort items by ID for stable output

@@ -499,7 +499,7 @@ func disableOpenClawHook(hookDir string) error {
 
 	// Try to disable via openclaw CLI first
 	disCmd := exec.Command("openclaw", "hooks", "disable", "agentshield")
-	disCmd.Run() // ignore errors — hook dir removal is the real action
+	_ = disCmd.Run() // ignore errors — hook dir removal is the real action
 
 	// Remove the hook directory
 	backupDir := hookDir + ".bak"
