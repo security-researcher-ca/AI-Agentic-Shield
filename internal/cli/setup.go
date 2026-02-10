@@ -763,3 +763,4 @@ func installPacks(srcDir, dstDir string) int {
 	}
 	return installed
 }
+// test comment
