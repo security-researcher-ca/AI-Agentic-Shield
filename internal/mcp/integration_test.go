@@ -86,8 +86,8 @@ func TestIntegration_EchoServer_Direct(t *testing.T) {
 	if err := json.Unmarshal(msg.Result, &listResult); err != nil {
 		t.Fatalf("failed to parse tools list: %v", err)
 	}
-	if len(listResult.Tools) != 4 {
-		t.Errorf("expected 4 tools, got %d", len(listResult.Tools))
+	if len(listResult.Tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(listResult.Tools))
 	}
 
 	// Test tools/call
@@ -248,9 +248,10 @@ func TestIntegration_ProxyWithEchoServer(t *testing.T) {
 		t.Logf("  %s: %s → %s", e.ToolName, e.Decision, strings.Join(e.Reasons, "; "))
 	}
 
-	// Should have 4 audit entries (4 tools/call messages, tools/list is not audited)
-	if len(auditLog) != 4 {
-		t.Errorf("expected 4 audit entries, got %d", len(auditLog))
+	// Should have 5 audit entries:
+	// 4 tools/call messages + 1 poisoned tool description from tools/list scan
+	if len(auditLog) != 5 {
+		t.Errorf("expected 5 audit entries, got %d", len(auditLog))
 	}
 
 	// Verify specific audit decisions
@@ -270,6 +271,16 @@ func TestIntegration_ProxyWithEchoServer(t *testing.T) {
 	}
 	if decisions["read_file"] != "AUDIT" {
 		t.Errorf("expected read_file AUDIT, got %s", decisions["read_file"])
+	}
+	if decisions["poisoned_add"] != "BLOCK" {
+		t.Errorf("expected poisoned_add BLOCK (description poisoning), got %s", decisions["poisoned_add"])
+	}
+
+	// Verify the tools/list response sent to client has poisoned_add removed
+	for _, r := range clientResponses {
+		if strings.Contains(r, "poisoned_add") {
+			t.Error("poisoned_add should have been hidden from tools/list response")
+		}
 	}
 }
 

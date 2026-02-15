@@ -144,16 +144,104 @@ func (p *Proxy) proxyClientToServer(clientReader io.Reader, serverWriter io.Writ
 	}
 }
 
-// proxyServerToClient reads messages from the MCP server and forwards them
-// to the client (IDE) without modification.
+// proxyServerToClient reads messages from the MCP server, scans tools/list
+// responses for poisoned tool descriptions, and forwards to the client.
 func (p *Proxy) proxyServerToClient(serverReader io.Reader, clientWriter io.Writer) {
 	scanner := bufio.NewScanner(serverReader)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
+
+		// Try to detect tools/list responses and scan for poisoned descriptions
+		if filtered := p.filterToolsListResponse(line); filtered != nil {
+			writeLineToWriter(clientWriter, filtered)
+			continue
+		}
+
 		writeLineToWriter(clientWriter, line)
 	}
+}
+
+// filterToolsListResponse checks if a message is a tools/list response.
+// If it is, scans each tool description for poisoning and removes poisoned tools.
+// Returns the modified JSON bytes, or nil if the message is not a tools/list response.
+func (p *Proxy) filterToolsListResponse(line []byte) []byte {
+	var msg Message
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return nil
+	}
+
+	// Only process responses (has result, no method)
+	if msg.Method != "" || msg.Result == nil {
+		return nil
+	}
+
+	// Try to parse as ListToolsResult
+	var listResult ListToolsResult
+	if err := json.Unmarshal(msg.Result, &listResult); err != nil {
+		return nil
+	}
+
+	// Must have a tools array to be a tools/list response
+	if listResult.Tools == nil {
+		return nil
+	}
+
+	// Scan each tool and filter out poisoned ones
+	var clean []ToolDefinition
+	removed := 0
+	for _, tool := range listResult.Tools {
+		scanResult := ScanToolDescription(tool)
+		if scanResult.Poisoned {
+			removed++
+			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] POISONED tool hidden: %s (%d signals)\n",
+				tool.Name, len(scanResult.Findings))
+			for _, f := range scanResult.Findings {
+				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s\n", f.Signal, f.Detail)
+			}
+
+			// Audit the poisoned tool
+			if p.cfg.OnAudit != nil {
+				reasons := make([]string, 0, len(scanResult.Findings))
+				for _, f := range scanResult.Findings {
+					reasons = append(reasons, string(f.Signal)+": "+f.Detail)
+				}
+				p.cfg.OnAudit(AuditEntry{
+					Timestamp:      time.Now().UTC().Format(time.RFC3339),
+					ToolName:       tool.Name,
+					Decision:       "BLOCK",
+					Flagged:        true,
+					TriggeredRules: []string{"tool-description-poisoning"},
+					Reasons:        reasons,
+					Source:         "mcp-proxy-description-scan",
+				})
+			}
+			continue
+		}
+		clean = append(clean, tool)
+	}
+
+	if removed == 0 {
+		return nil // no changes needed, use original bytes
+	}
+
+	_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] tools/list: %d/%d tools passed, %d hidden\n",
+		len(clean), len(listResult.Tools), removed)
+
+	// Rebuild the response with filtered tools
+	listResult.Tools = clean
+	newResult, err := json.Marshal(listResult)
+	if err != nil {
+		return nil
+	}
+
+	msg.Result = newResult
+	out, err := json.Marshal(msg)
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // evaluateToolCall evaluates a tools/call message against the MCP policy.
