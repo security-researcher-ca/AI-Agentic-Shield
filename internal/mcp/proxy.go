@@ -244,7 +244,8 @@ func (p *Proxy) filterToolsListResponse(line []byte) []byte {
 	return out
 }
 
-// evaluateToolCall evaluates a tools/call message against the MCP policy.
+// evaluateToolCall evaluates a tools/call message against the MCP policy
+// and scans argument content for sensitive data exfiltration.
 // Returns (true, blockResponse) if blocked, or (false, nil) if allowed.
 func (p *Proxy) evaluateToolCall(msg *Message) (bool, []byte) {
 	params, err := ExtractToolCall(msg)
@@ -254,6 +255,23 @@ func (p *Proxy) evaluateToolCall(msg *Message) (bool, []byte) {
 	}
 
 	result := p.cfg.Evaluator.EvaluateToolCall(params.Name, params.Arguments)
+
+	// If policy didn't block, scan argument content for secrets/exfiltration
+	if result.Decision != "BLOCK" {
+		contentResult := ScanToolCallContent(params.Name, params.Arguments)
+		if contentResult.Blocked {
+			result.Decision = "BLOCK"
+			result.TriggeredRules = append(result.TriggeredRules, "argument-content-scan")
+			for _, f := range contentResult.Findings {
+				result.Reasons = append(result.Reasons, string(f.Signal)+": "+f.Detail+" (arg: "+f.ArgName+")")
+			}
+			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by content scan: %s (%d signals)\n",
+				params.Name, len(contentResult.Findings))
+			for _, f := range contentResult.Findings {
+				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s (arg: %s)\n", f.Signal, f.Detail, f.ArgName)
+			}
+		}
+	}
 
 	// Log the audit entry
 	if p.cfg.OnAudit != nil {

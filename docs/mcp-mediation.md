@@ -25,18 +25,19 @@ AgentShield can intercept and evaluate [Model Context Protocol](https://modelcon
 3. The **MCP Policy Engine** evaluates the tool name and arguments against:
    - A **blocked tools list** (always-blocked tool names)
    - **Fine-grained rules** with glob/regex tool name matching and argument pattern matching
-4. **Decision:**
+4. **Argument content scanning** — even if the tool name and argument patterns pass policy, AgentShield scans all argument *values* for secrets, credentials, and encoded data that may indicate exfiltration.
+5. **Decision:**
    - `BLOCK` → proxy returns a JSON-RPC error to the IDE; the request never reaches the server.
    - `AUDIT` → request is forwarded to the server; the decision is logged.
    - `ALLOW` → request is forwarded silently.
-5. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
-6. All other MCP messages (`initialize`, notifications) pass through transparently.
+6. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
+7. All other MCP messages (`initialize`, notifications) pass through transparently.
 
 ### What is mediated
 
 | Message type | Mediated? | Notes |
 |---|---|---|
-| `tools/call` | **Yes** | Tool name + arguments evaluated against policy |
+| `tools/call` | **Yes** | Tool name + argument patterns evaluated against policy; argument values scanned for secrets/credentials |
 | `tools/list` | **Yes** | Server→client responses scanned for tool description poisoning; poisoned tools hidden |
 | `resources/read` | No | Deferred to future version |
 | `initialize` | No | Passes through |
@@ -141,6 +142,36 @@ rules:
 2. **Rules** — evaluated in order, most restrictive decision wins
 3. **Default** — applied if no rule matches
 
+## Argument Content Scanning
+
+After policy evaluation, the proxy scans all argument **values** in `tools/call` requests for sensitive data that may indicate exfiltration. This catches attacks where a legitimate tool (e.g., `add`, `send_message`) is used to smuggle secrets through its arguments.
+
+### How it works
+
+Every argument value (including nested objects and arrays) is scanned against pattern-based detectors. If any signal fires, the tool call is **blocked** even if the policy would otherwise allow it.
+
+### Detection signals
+
+| Signal | What it catches | Example |
+|---|---|---|
+| `private_key` | SSH, PGP, RSA private keys | `-----BEGIN RSA PRIVATE KEY-----` |
+| `aws_credential` | AWS access key IDs, secret keys | `AKIAIOSFODNN7EXAMPLE` |
+| `github_token` | GitHub PATs | `ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef` |
+| `bearer_token` | Bearer/JWT tokens | `Bearer eyJhbGciOiJIUzI1NiIs...` |
+| `generic_secret` | API key/secret assignments | `api_key=sk-proj-abc123...` |
+| `stripe_key` | Stripe secret keys | `sk_live_REDACTED` |
+| `slack_token` | Slack bot/app tokens | `xoxb-1234567890123-...` |
+| `basic_auth` | Credentials in URLs | `https://admin:pass@host/` |
+| `env_file_content` | .env file contents with secrets | Multi-line `KEY=VALUE` with sensitive names |
+| `base64_blob` | Large base64-encoded blobs (>200 chars) | Possible encoded file exfiltration |
+| `high_entropy` | High-entropy strings (>100 chars) | Possible encoded secrets |
+
+### Real-world attack this stops
+
+The WhatsApp MCP exfiltration attack (Apr 2025): a poisoned `add` tool tricks the agent into reading `~/.ssh/id_rsa` and passing the content as a `sidenote` parameter. Even if the tool name `add` is allowed, the content scanner detects the SSH private key in the argument value and blocks the call.
+
+---
+
 ## Tool Description Poisoning Detection
 
 The proxy scans every `tools/list` response for **tool description poisoning** — the #1 MCP attack vector in 2025 (WhatsApp MCP exfiltration, GitHub MCP data heist, Invariant Labs research).
@@ -174,8 +205,9 @@ Every hidden tool is recorded in the audit log with:
 | `internal/mcp/parser.go` | JSON-RPC message parsing and classification |
 | `internal/mcp/policy.go` | MCP policy engine with glob/regex matching |
 | `internal/mcp/loader.go` | Policy YAML loading and defaults |
-| `internal/mcp/proxy.go` | Stdio proxy (client ↔ server bridge) + description filtering |
+| `internal/mcp/proxy.go` | Stdio proxy (client ↔ server bridge) + description filtering + content scanning |
 | `internal/mcp/description_scanner.go` | Tool description poisoning heuristics (5 signal categories) |
+| `internal/mcp/content_scanner.go` | Argument content scanning for secrets/exfiltration (11 signal types) |
 | `internal/cli/mcp_proxy.go` | `agentshield mcp-proxy` CLI command |
 | `internal/cli/setup_mcp.go` | `agentshield setup mcp` IDE config rewriting |
 | `internal/mcp/testdata/echo_server.go` | Test MCP server for integration tests |

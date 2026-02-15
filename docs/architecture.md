@@ -37,7 +37,8 @@ flowchart TB
         direction TB
         DescScan["Tool Description\nPoisoning Scanner"]
         MCPPolicy["MCP Policy Engine\n(blocked tools + rules)"]
-        DescScan --> MCPPolicy
+        ContentScan["Argument Content\nScanner\n(secrets, credentials,\nbase64 exfiltration)"]
+        DescScan --> MCPPolicy --> ContentScan
     end
 
     AS --- AgentShield

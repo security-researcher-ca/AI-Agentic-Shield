@@ -168,10 +168,39 @@ func scanCommand(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\n  Description scanner: %d/2 passed\n\n", descPass)
 
+	// ── Content scanner tests ────────────────────────────────────
+
+	fmt.Println("─── MCP Argument Content Scanner ───────────────────────")
+
+	contentPass := 0
+
+	// Should block: SSH key in argument
+	exfilResult := mcp.ScanToolCallContent("send_message", map[string]interface{}{
+		"body": "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
+	})
+	if exfilResult.Blocked {
+		fmt.Printf("  ✅ SSH key exfiltration blocked: %d signals\n", len(exfilResult.Findings))
+		contentPass++
+	} else {
+		fmt.Println("  ❌ SSH key exfiltration NOT blocked")
+	}
+
+	// Should pass: clean argument
+	cleanContentResult := mcp.ScanToolCallContent("get_weather", map[string]interface{}{
+		"location": "New York",
+	})
+	if !cleanContentResult.Blocked {
+		fmt.Println("  ✅ Clean arguments passed:     no false positive")
+		contentPass++
+	} else {
+		fmt.Printf("  ❌ Clean arguments false positive: %d signals\n", len(cleanContentResult.Findings))
+	}
+	fmt.Printf("\n  Content scanner: %d/2 passed\n\n", contentPass)
+
 	// ── Summary ──────────────────────────────────────────────────
 
-	total := len(shellCases) + len(mcpCases) + 2
-	passed := shellPass + mcpPass + descPass
+	total := len(shellCases) + len(mcpCases) + 2 + 2
+	passed := shellPass + mcpPass + descPass + contentPass
 	failed := total - passed
 
 	fmt.Println("═══════════════════════════════════════════════════════")

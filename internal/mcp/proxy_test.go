@@ -451,6 +451,90 @@ func TestProxy_CleanToolsListPassthrough(t *testing.T) {
 	}
 }
 
+func TestProxy_ContentScanBlocksExfiltration(t *testing.T) {
+	evaluator := NewPolicyEvaluator(testProxyPolicy())
+
+	// A tool call that passes policy (send_message is not blocked, no path args)
+	// but contains an SSH private key in the body argument — content scan should block it
+	clientInput := `{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"send_message","arguments":{"to":"user@example.com","body":"-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0Z3VS5JJcds3xfn\n-----END RSA PRIVATE KEY-----"}}}` + "\n"
+
+	var audited []AuditEntry
+	var mu sync.Mutex
+
+	proxy := NewProxy(ProxyConfig{
+		Evaluator: evaluator,
+		OnAudit: func(e AuditEntry) {
+			mu.Lock()
+			defer mu.Unlock()
+			audited = append(audited, e)
+		},
+		Stderr: io.Discard,
+	})
+
+	clientReader := strings.NewReader(clientInput)
+	clientWriter := &bytes.Buffer{}
+	serverBuf := &bytes.Buffer{}
+	serverWriter := newNopWriteCloser(serverBuf)
+
+	proxy.RunWithIO(clientReader, clientWriter, strings.NewReader(""), serverWriter)
+
+	// The tool call should have been blocked (not forwarded to server)
+	if serverBuf.Len() != 0 {
+		t.Error("expected tool call to be blocked by content scan, but it was forwarded to server")
+	}
+
+	// Client should receive a block response
+	clientOutput := strings.TrimSpace(clientWriter.String())
+	if !strings.Contains(clientOutput, "AgentShield") {
+		t.Errorf("expected block response sent to client, got: %s", clientOutput)
+	}
+
+	// Audit should record the block with content scan rule
+	mu.Lock()
+	defer mu.Unlock()
+	if len(audited) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audited))
+	}
+	if audited[0].Decision != "BLOCK" {
+		t.Errorf("expected BLOCK, got %s", audited[0].Decision)
+	}
+	foundContentRule := false
+	for _, rule := range audited[0].TriggeredRules {
+		if rule == "argument-content-scan" {
+			foundContentRule = true
+		}
+	}
+	if !foundContentRule {
+		t.Errorf("expected 'argument-content-scan' in triggered rules, got: %v", audited[0].TriggeredRules)
+	}
+}
+
+func TestProxy_ContentScanAllowsClean(t *testing.T) {
+	evaluator := NewPolicyEvaluator(testProxyPolicy())
+
+	// A clean tool call that should pass both policy and content scan
+	clientInput := `{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"get_weather","arguments":{"location":"New York"}}}` + "\n"
+	serverResponse := `{"jsonrpc":"2.0","id":21,"result":{"content":[{"type":"text","text":"Sunny 72F"}]}}` + "\n"
+
+	proxy := NewProxy(ProxyConfig{
+		Evaluator: evaluator,
+		Stderr:    io.Discard,
+	})
+
+	clientReader := strings.NewReader(clientInput)
+	clientWriter := &bytes.Buffer{}
+	serverReader := strings.NewReader(serverResponse)
+	serverBuf := &bytes.Buffer{}
+	serverWriter := newNopWriteCloser(serverBuf)
+
+	proxy.RunWithIO(clientReader, clientWriter, serverReader, serverWriter)
+
+	// Tool call should have been forwarded to server
+	if serverBuf.Len() == 0 {
+		t.Error("expected clean tool call to be forwarded to server")
+	}
+}
+
 func TestArgumentsToJSON(t *testing.T) {
 	got := ArgumentsToJSON(map[string]interface{}{"key": "val"})
 	if got != `{"key":"val"}` {

@@ -151,6 +151,7 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 - **6-layer analysis** — Regex, Structural (AST), Semantic, Dataflow, Stateful, Guardian
 - **MCP tool call mediation** — intercepts `tools/call` requests and blocks dangerous tool invocations
 - **Tool description poisoning detection** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration, and cross-tool shadowing ([details](docs/mcp-mediation.md#tool-description-poisoning-detection))
+- **Argument content scanning** — detects SSH keys, AWS credentials, API tokens, .env contents, and large base64 blobs in MCP tool call arguments ([details](docs/mcp-mediation.md#argument-content-scanning))
 - **100% precision / 96.2% recall** across 123 shell threat test cases ([details](docs/accuracy.md))
 - **24/24 MCP red-team cases** pass (blocked tools, credential access, system writes, evasion)
 - **Protected paths** — `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`
