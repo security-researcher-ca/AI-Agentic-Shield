@@ -21,8 +21,9 @@ MCP server. The proxy intercepts tools/call requests, evaluates them against
 AgentShield's MCP policy, and blocks dangerous tool calls before they reach
 the server.
 
-All other MCP messages (tools/list, notifications, responses) are forwarded
-transparently.
+Tools/list responses from the server are scanned for tool description
+poisoning — poisoned tools are silently hidden before reaching the IDE.
+All other MCP messages (notifications, responses) are forwarded transparently.
 
 Usage in IDE MCP config (e.g. .cursor/mcp.json):
   "command": "agentshield mcp-proxy -- npx -y @modelcontextprotocol/server-filesystem /path"

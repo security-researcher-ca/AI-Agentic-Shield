@@ -20,6 +20,22 @@ type AuditEvent struct {
 	Mode           string   `json:"mode"`
 	Source         string   `json:"source,omitempty"`
 	Error          string   `json:"error,omitempty"`
+	// MCP-specific fields (present when source starts with "mcp-proxy")
+	ToolName     string                 `json:"tool_name,omitempty"`
+	MCPArguments map[string]interface{} `json:"arguments,omitempty"`
+}
+
+// IsMCP returns true if this event came from the MCP proxy.
+func (e AuditEvent) IsMCP() bool {
+	return e.ToolName != ""
+}
+
+// DisplayLabel returns a human-readable label: the command (shell) or tool name (MCP).
+func (e AuditEvent) DisplayLabel() string {
+	if e.ToolName != "" {
+		return "[MCP] " + e.ToolName
+	}
+	return e.Command
 }
 
 type AuditLogger struct {

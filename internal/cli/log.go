@@ -130,7 +130,7 @@ func printEvents(events []logger.AuditEvent) {
 			flagStr = " [FLAGGED]"
 		}
 
-		fmt.Printf("%s %s %s%s\n", icon, ts, e.Command, flagStr)
+		fmt.Printf("%s %s %s%s\n", icon, ts, e.DisplayLabel(), flagStr)
 
 		if len(e.TriggeredRules) > 0 {
 			fmt.Printf("     Rules: %s\n", strings.Join(e.TriggeredRules, ", "))
@@ -140,10 +140,15 @@ func printEvents(events []logger.AuditEvent) {
 				fmt.Printf("     Reason: %s\n", r)
 			}
 		}
+		if e.Source != "" {
+			fmt.Printf("     Source: %s\n", e.Source)
+		}
 		if e.Error != "" {
 			fmt.Printf("     Error: %s\n", e.Error)
 		}
-		fmt.Printf("     Cwd: %s\n", e.Cwd)
+		if e.Cwd != "" {
+			fmt.Printf("     Cwd: %s\n", e.Cwd)
+		}
 		fmt.Println()
 	}
 }
@@ -169,7 +174,7 @@ func printSummary(all []logger.AuditEvent, filtered []logger.AuditEvent) {
 	fmt.Println("═══════════════════════════════════════════")
 	fmt.Printf("  Total events:    %d\n", totalAll)
 	fmt.Printf("  ALLOW:           %d\n", counts["ALLOW"])
-	fmt.Printf("  AUDIT (flagged): %d\n", counts["AUDIT"])
+	fmt.Printf("  AUDIT:           %d\n", counts["AUDIT"])
 	fmt.Printf("  BLOCK:           %d\n", counts["BLOCK"])
 	fmt.Printf("  Errors:          %d\n", errorCount)
 	fmt.Println("═══════════════════════════════════════════")
