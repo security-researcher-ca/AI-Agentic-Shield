@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MCP Communication Mediation** — stdio proxy intercepts and evaluates MCP tool calls between IDE agents and MCP servers (`agentshield mcp-proxy`)
+- **MCP Policy Engine** — blocked tools list, glob/regex tool name matching, argument pattern matching via `mcp-policy.yaml`
+- **Tool Description Poisoning Detection (P1)** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration intent, cross-tool shadowing, stealth instructions; poisoned tools silently hidden from IDE
+- **Argument Content Scanning (P2)** — scans `tools/call` argument values for SSH keys, AWS credentials, API tokens, .env contents, base64 blobs, and high-entropy strings; blocks exfiltration even through legitimate tools
+- **`agentshield setup mcp`** — automatic IDE MCP config rewriting (Cursor, Claude Desktop)
+- **`agentshield status`** — at-a-glance view of IDE hooks, MCP proxy status, policy files, packs, and audit log
+- **`agentshield scan`** — 14-test self-diagnostic covering shell policy, MCP policy, description scanner, and content scanner
+- MCP red-team regression suite (24 test cases, 100% pass rate)
+- MCP integration tests with echo server
 - Pre-commit hooks for automated quality checks
 - GitHub Actions CI/CD pipeline
 - Issue and PR templates
@@ -17,10 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OSSF Scorecard integration
 
 ### Changed
+- `agentshield log` now displays MCP events with `[MCP]` prefix, shows `Source` field, hides `Cwd` for MCP entries
+- `agentshield log --summary` improved statistics display
+- Architecture diagrams updated with MCP proxy flow
 - Improved linting and error handling
 - Enhanced build automation
 
 ### Security
+- Tool description poisoning detection stops WhatsApp MCP exfiltration (Apr 2025), GitHub MCP data heist (May 2025), and Invariant Labs attack patterns
+- Argument content scanning stops credential exfiltration via MCP tool call parameters
 - Added comprehensive security scanning
 - Established vulnerability disclosure process
 

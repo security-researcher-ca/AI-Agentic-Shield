@@ -1,8 +1,19 @@
 # AgentShield Architecture & Development Guide
 
+> **⚠️ Note:** Parts of this document are outdated (references to `internal/approval/` and `internal/sandbox/` which have been removed). For current architecture, see:
+> - **[docs/architecture.md](docs/architecture.md)** — System overview, 6-layer pipeline, MCP proxy
+> - **[docs/mcp-mediation.md](docs/mcp-mediation.md)** — MCP proxy, policy engine, description & content scanning
+> - **[docs/policy-guide.md](docs/policy-guide.md)** — Shell + MCP policy authoring
+> - **[PROGRESS.md](PROGRESS.md)** — Full implementation progress (Phase 1–6)
+
 ## Overview
 
 AgentShield is a local-first security gateway that sits between AI agents and high-risk tools, enforcing deterministic policies to prevent prompt-injection-driven damage, data exfiltration, and destructive actions.
+
+**Current scope:**
+- **Shell command mediation** — 6-layer analyzer pipeline (regex, structural, semantic, dataflow, stateful, guardian)
+- **MCP tool call mediation** — stdio proxy with policy evaluation, tool description poisoning detection, and argument content scanning
+- **IDE integrations** — Windsurf hooks, Cursor hooks, OpenClaw hooks, Cursor/Claude Desktop MCP proxy setup
 
 ## Architecture Flow Diagrams
 

@@ -285,6 +285,37 @@
 
 ---
 
+## Phase 6 — MCP Communication Mediation
+
+### M6.0 Core MCP Proxy
+- [x] MCP JSON-RPC message types and parser (`internal/mcp/types.go`, `parser.go`)
+- [x] MCP policy engine with blocked tools, glob/regex matching, argument patterns (`internal/mcp/policy.go`)
+- [x] MCP policy YAML loader with sensible defaults (`internal/mcp/loader.go`)
+- [x] Stdio proxy: client ↔ server bridge with tool call interception (`internal/mcp/proxy.go`)
+- [x] `agentshield mcp-proxy` CLI command (`internal/cli/mcp_proxy.go`)
+- [x] `agentshield setup mcp` — automatic IDE config rewriting for Cursor and Claude Desktop (`internal/cli/setup_mcp.go`)
+- [x] Echo server for integration testing (`internal/mcp/testdata/echo_server.go`)
+- [x] 24 red-team regression test cases (100% pass rate)
+
+### M6.1 Tool Description Poisoning Detection (P1)
+- [x] Description scanner with 5 signal categories: hidden_instructions, credential_harvest, exfiltration_intent, cross_tool_override, stealth_instruction (`internal/mcp/description_scanner.go`)
+- [x] Proxy intercepts `tools/list` responses, scans each tool, silently hides poisoned tools
+- [x] 11 scanner unit tests + 2 proxy filtering tests
+- [x] Integration test with poisoned tool in echo server
+
+### M6.2 Argument Content Scanning (P2)
+- [x] Content scanner with 11 signal types: private_key, aws_credential, github_token, bearer_token, generic_secret, stripe_key, slack_token, basic_auth, env_file_content, base64_blob, high_entropy (`internal/mcp/content_scanner.go`)
+- [x] Proxy scans argument values after policy evaluation; blocks exfiltration through legitimate tools
+- [x] 18 scanner unit tests + 2 proxy integration tests
+- [x] Handles nested objects and arrays in arguments
+
+### M6.3 Usability Improvements
+- [x] `agentshield status` — shows IDE hooks, MCP proxy status, policy files, packs, audit log
+- [x] `agentshield scan` — 14-test self-diagnostic (shell policy + MCP policy + description scanner + content scanner)
+- [x] `agentshield log` — displays MCP events with `[MCP]` prefix and tool_name
+
+---
+
 ## Housekeeping
 - [x] Remove empty `Others/` folder ✅
 - [x] Fix typo: `agent_gateway_desing.md` → `agent_gateway_design.md` ✅

@@ -670,3 +670,89 @@ agentshield log --decision BLOCK
 ```
 
 - **The pipeline enhances all rules.** You only need to write regex rules. Structural, Semantic, Dataflow, Stateful, and Guardian layers automatically provide deeper analysis on top.
+
+---
+
+## MCP Policy
+
+AgentShield also mediates MCP (Model Context Protocol) tool calls. MCP policy is separate from shell command policy because the threat model and rule shapes are different.
+
+### MCP Policy File
+
+MCP policy is loaded from `~/.agentshield/mcp-policy.yaml`. A default is created by `agentshield setup mcp`.
+
+```yaml
+defaults:
+  decision: "AUDIT"          # ALLOW, AUDIT, or BLOCK
+
+# Tools always blocked (exact name or glob)
+blocked_tools:
+  - "execute_command"
+  - "run_shell"
+  - "run_terminal_command"
+
+# Fine-grained rules
+rules:
+  - id: block-ssh-access
+    match:
+      tool_name_any:
+        - "read_file"
+        - "write_file"
+      argument_patterns:
+        path: "**/.ssh/**"
+    decision: "BLOCK"
+    reason: "Access to SSH key directories is blocked."
+```
+
+### MCP Match Types
+
+| Field | Type | Description |
+|---|---|---|
+| `tool_name` | Exact/glob | Single tool name pattern |
+| `tool_name_regex` | Regex | Regex against tool name |
+| `tool_name_any` | List | Match if any name in list matches |
+| `argument_patterns` | Map | Glob patterns matched against argument values |
+
+### MCP Decision Precedence
+
+1. **Blocked tools list** — checked first, always wins
+2. **Rules** — evaluated in order, most restrictive decision wins
+3. **Argument content scan** — automatic, no config needed (detects secrets, credentials, base64 blobs)
+4. **Default** — applied if nothing else matches
+
+### MCP Policy Examples
+
+```yaml
+# Block all file writes to system directories
+- id: block-system-writes
+  match:
+    tool_name_any: ["write_file", "create_file", "edit_file"]
+    argument_patterns:
+      path: "/etc/**"
+  decision: "BLOCK"
+  reason: "File write to system directories is blocked."
+
+# Block any tool that accesses AWS credentials
+- id: block-aws-access
+  match:
+    argument_patterns:
+      path: "**/.aws/**"
+  decision: "BLOCK"
+  reason: "Access to AWS credential directories is blocked."
+
+# Audit all database tools
+- id: audit-database
+  match:
+    tool_name_regex: "(query_database|execute_sql|run_query)"
+  decision: "AUDIT"
+  reason: "Database operations flagged for review."
+```
+
+### Built-in Protections (No Config Needed)
+
+Even without any MCP policy file, AgentShield provides two layers of automatic protection:
+
+- **Tool Description Poisoning Scanner** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration intent, cross-tool shadowing, and stealth instructions. Poisoned tools are silently removed before reaching the IDE.
+- **Argument Content Scanner** — scans all `tools/call` argument values for SSH keys, AWS credentials, API tokens, .env file contents, large base64 blobs, and high-entropy strings. Blocks exfiltration even through legitimate tools.
+
+See the [MCP Mediation docs](mcp-mediation.md) for full details.
