@@ -202,6 +202,139 @@ func TestContentScan_NilArguments(t *testing.T) {
 	}
 }
 
+func TestContentScan_PGPPrivateKey(t *testing.T) {
+	result := ScanToolCallContent("send_data", map[string]interface{}{
+		"payload": "-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2\n\nlQOYBF...\n-----END PGP PRIVATE KEY BLOCK-----",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — PGP private key")
+	}
+	assertContentSignal(t, result, SignalPrivateKey)
+}
+
+func TestContentScan_OpenSSHKey(t *testing.T) {
+	result := ScanToolCallContent("upload", map[string]interface{}{
+		"file_content": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEA...\n-----END OPENSSH PRIVATE KEY-----",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — OpenSSH private key")
+	}
+	assertContentSignal(t, result, SignalPrivateKey)
+}
+
+func TestContentScan_HighEntropyString(t *testing.T) {
+	// Generate a string with high entropy (random-looking chars, >100 chars)
+	highEntropy := "aK9xZm3qR7wL2nY8pJ4vT6bF1hD5gS0cE3iU9oA7mW2lX8jN4kQ6rV1tB5yH0fG3dP9sI7uO2eC8aM4nR6wJ1xL5kT3bF9hY0gQ7vD2pS8cE4iU6oA3mW1lX7jN9kQ5rV0tB4yH2fG6dP8sI1uO3eC7aM9n"
+	result := ScanToolCallContent("process", map[string]interface{}{
+		"data": highEntropy,
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — high entropy string")
+	}
+	assertContentSignal(t, result, SignalHighEntropy)
+}
+
+func TestContentScan_MultipleSecretsInOneCall(t *testing.T) {
+	result := ScanToolCallContent("exfil", map[string]interface{}{
+		"aws_key":  "AKIAIOSFODNN7EXAMPLE",
+		"gh_token": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",
+		"stripe":   "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — multiple secrets")
+	}
+	if len(result.Findings) < 3 {
+		t.Errorf("expected at least 3 findings, got %d", len(result.Findings))
+	}
+}
+
+func TestContentScan_ArrayArgWithSecret(t *testing.T) {
+	result := ScanToolCallContent("batch", map[string]interface{}{
+		"items": []interface{}{
+			"normal text",
+			"AKIAIOSFODNN7EXAMPLE",
+			"more normal text",
+		},
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — AWS key in array argument")
+	}
+	assertContentSignal(t, result, SignalAWSCredential)
+}
+
+func TestContentScan_NumericArgsNotBlocked(t *testing.T) {
+	result := ScanToolCallContent("calc", map[string]interface{}{
+		"a":      42,
+		"b":      3.14,
+		"negate": true,
+	})
+	if result.Blocked {
+		t.Errorf("numeric/boolean args should not be blocked, got: %v", result.Findings)
+	}
+}
+
+func TestContentScan_GCPServiceAccountKey(t *testing.T) {
+	// Google Cloud service account JSON typically contains private_key field
+	gcpKey := `{
+  "type": "service_account",
+  "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----\n",
+  "client_email": "test@project.iam.gserviceaccount.com"
+}`
+	result := ScanToolCallContent("upload_config", map[string]interface{}{
+		"content": gcpKey,
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — GCP service account key contains private key")
+	}
+	assertContentSignal(t, result, SignalPrivateKey)
+}
+
+func TestContentScan_SafeURLNotBlocked(t *testing.T) {
+	// URLs without credentials should not trigger basic_auth
+	result := ScanToolCallContent("fetch", map[string]interface{}{
+		"url": "https://api.example.com/v2/data?page=1&limit=50",
+	})
+	if result.Blocked {
+		t.Errorf("safe URL should not be blocked, got: %v", result.Findings)
+	}
+}
+
+func TestContentScan_SafeJSONNotBlocked(t *testing.T) {
+	// Normal JSON config should not trigger
+	result := ScanToolCallContent("write_file", map[string]interface{}{
+		"path":    "/tmp/config.json",
+		"content": `{"database": {"host": "localhost", "port": 5432, "name": "mydb"}, "debug": true}`,
+	})
+	if result.Blocked {
+		t.Errorf("normal JSON should not be blocked, got: %v", result.Findings)
+	}
+}
+
+func TestContentScan_SafeCodeNotBlocked(t *testing.T) {
+	// Source code with the word "key" should not trigger
+	result := ScanToolCallContent("write_file", map[string]interface{}{
+		"path":    "/tmp/main.go",
+		"content": "package main\n\nfunc main() {\n\tkey := \"user-input\"\n\tfmt.Println(key)\n}",
+	})
+	if result.Blocked {
+		t.Errorf("normal source code should not be blocked, got: %v", result.Findings)
+	}
+}
+
+func TestContentScan_DeeplyNestedSecret(t *testing.T) {
+	result := ScanToolCallContent("complex", map[string]interface{}{
+		"level1": map[string]interface{}{
+			"level2": map[string]interface{}{
+				"level3": "AKIAIOSFODNN7EXAMPLE",
+			},
+		},
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — AWS key in deeply nested argument")
+	}
+	assertContentSignal(t, result, SignalAWSCredential)
+}
+
 func assertContentSignal(t *testing.T, result ContentScanResult, signal ContentSignal) {
 	t.Helper()
 	for _, f := range result.Findings {

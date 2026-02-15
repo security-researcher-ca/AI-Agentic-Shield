@@ -221,6 +221,159 @@ func TestConfigGuard_AgentShieldSubdir(t *testing.T) {
 	assertConfigCategory(t, result, "agentshield-config")
 }
 
+func TestConfigGuard_PathTraversalToBashrc(t *testing.T) {
+	home := os.Getenv("HOME")
+	// Path traversal that resolves to ~/.bashrc
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path": home + "/project/../.bashrc",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — path traversal to .bashrc")
+	}
+	assertConfigCategory(t, result, "shell-config")
+}
+
+func TestConfigGuard_PathTraversalToAgentShield(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path": home + "/dev/../.agentshield/policy.yaml",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — path traversal to AgentShield config")
+	}
+}
+
+func TestConfigGuard_ClaudeDesktopConfig(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    home + "/Library/Application Support/Claude/claude_desktop_config.json",
+		"content": `{"mcpServers":{"evil":{"command":"evil-server"}}}`,
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to Claude Desktop config")
+	}
+	assertConfigCategory(t, result, "ide-mcp-config")
+}
+
+func TestConfigGuard_MultipleFindings(t *testing.T) {
+	home := os.Getenv("HOME")
+	// A tool call that has paths to multiple protected configs
+	result := CheckConfigGuard("multi_write", map[string]interface{}{
+		"primary":   home + "/.bashrc",
+		"secondary": home + "/.agentshield/policy.yaml",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — multiple protected paths")
+	}
+	if len(result.Findings) < 2 {
+		t.Errorf("expected at least 2 findings, got %d", len(result.Findings))
+	}
+}
+
+func TestConfigGuard_CursorHooksJson(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    home + "/.cursor/hooks.json",
+		"content": `{"hooks":[]}`,
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to Cursor hooks")
+	}
+	assertConfigCategory(t, result, "ide-hooks")
+}
+
+func TestConfigGuard_YarnrcYml(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    home + "/.yarnrc.yml",
+		"content": "npmRegistryServer: https://evil.com/npm/",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to .yarnrc.yml")
+	}
+	assertConfigCategory(t, result, "package-config")
+}
+
+func TestConfigGuard_BunfigToml(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    home + "/.bunfig.toml",
+		"content": `[install]\nregistry = "https://evil.com/npm/"`,
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to .bunfig.toml")
+	}
+	assertConfigCategory(t, result, "package-config")
+}
+
+func TestConfigGuard_PyPIrc(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    home + "/.pypirc",
+		"content": "[pypi]\nusername = __token__\npassword = pypi-xxx",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to .pypirc")
+	}
+	assertConfigCategory(t, result, "package-config")
+}
+
+func TestConfigGuard_AllowProjectDotfile(t *testing.T) {
+	// A .bashrc inside a project directory should NOT be blocked
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    "/Users/dev/myproject/.bashrc",
+		"content": "# project-local bashrc",
+	})
+	// This should NOT be blocked because it's not at ~
+	if result.Blocked {
+		t.Errorf("expected allowed — .bashrc inside project dir, got: %v", result.Findings)
+	}
+}
+
+func TestConfigGuard_AllowProjectNpmrc(t *testing.T) {
+	// A .npmrc inside a project directory is normal
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    "/Users/dev/myproject/.npmrc",
+		"content": "save-exact=true",
+	})
+	if result.Blocked {
+		t.Errorf("expected allowed — .npmrc inside project dir, got: %v", result.Findings)
+	}
+}
+
+func TestConfigGuard_ProfileVariant(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path": home + "/.zprofile",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to .zprofile")
+	}
+	assertConfigCategory(t, result, "shell-config")
+}
+
+func TestConfigGuard_BashProfile(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path": home + "/.bash_profile",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to .bash_profile")
+	}
+	assertConfigCategory(t, result, "shell-config")
+}
+
+func TestConfigGuard_GitConfigXDG(t *testing.T) {
+	home := os.Getenv("HOME")
+	result := CheckConfigGuard("write_file", map[string]interface{}{
+		"path": home + "/.config/git/config",
+	})
+	if !result.Blocked {
+		t.Fatal("expected blocked — writing to XDG git config")
+	}
+	assertConfigCategory(t, result, "git-config")
+}
+
 func assertConfigCategory(t *testing.T, result ConfigGuardResult, category string) {
 	t.Helper()
 	for _, f := range result.Findings {

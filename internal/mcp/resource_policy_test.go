@@ -90,3 +90,137 @@ func TestResourcePolicy_NilPolicy(t *testing.T) {
 		t.Errorf("expected AUDIT default, got %s", result.Decision)
 	}
 }
+
+func TestResourcePolicy_FileURItoSSHKey(t *testing.T) {
+	home := os.Getenv("HOME")
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+	})
+	// file:// URI to SSH key should be blocked by config guard
+	result := evaluator.EvaluateResourceRead("file://" + home + "/.ssh/config")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for file:// to SSH config, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_FileURItoShellConfig(t *testing.T) {
+	home := os.Getenv("HOME")
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+	})
+	result := evaluator.EvaluateResourceRead("file://" + home + "/.bashrc")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for file:// to .bashrc, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_BlockedResourceExactMatch(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults:         MCPDefaults{Decision: policy.DecisionAudit},
+		BlockedResources: []string{"secret://production-db-password"},
+	})
+	result := evaluator.EvaluateResourceRead("secret://production-db-password")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for exact blocked resource, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_BlockedResourceNoFalsePositive(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults:         MCPDefaults{Decision: policy.DecisionAudit},
+		BlockedResources: []string{"secret://production-db-password"},
+	})
+	result := evaluator.EvaluateResourceRead("secret://staging-db-password")
+	if result.Decision == "BLOCK" {
+		t.Errorf("expected AUDIT — different secret name, got BLOCK")
+	}
+}
+
+func TestResourcePolicy_MultipleRulesMatchMostRestrictive(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAllow},
+		ResourceRules: []ResourceRule{
+			{
+				ID:       "audit-all-db",
+				Match:    ResourceMatch{Scheme: "postgres"},
+				Decision: policy.DecisionAudit,
+				Reason:   "Database access audited.",
+			},
+			{
+				ID:       "block-prod-db",
+				Match:    ResourceMatch{URIRegex: "prod"},
+				Decision: policy.DecisionBlock,
+				Reason:   "Production database blocked.",
+			},
+		},
+	})
+	result := evaluator.EvaluateResourceRead("postgres://user@prod-db:5432/mydb")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK (most restrictive), got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_URIRegexMatch(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+		ResourceRules: []ResourceRule{
+			{
+				ID:       "block-internal",
+				Match:    ResourceMatch{URIRegex: `internal\.corp\.com`},
+				Decision: policy.DecisionBlock,
+				Reason:   "Internal resources blocked.",
+			},
+		},
+	})
+	result := evaluator.EvaluateResourceRead("https://api.internal.corp.com/secrets")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for internal URI, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_SafeFileURI(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+	})
+	// file:// to a project file should be allowed
+	result := evaluator.EvaluateResourceRead("file:///Users/dev/project/README.md")
+	if result.Decision != "AUDIT" {
+		t.Errorf("expected AUDIT for safe file:// URI, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_MysqlSchemeBlock(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+		ResourceRules: []ResourceRule{
+			{
+				ID:       "block-mysql",
+				Match:    ResourceMatch{Scheme: "mysql"},
+				Decision: policy.DecisionBlock,
+				Reason:   "MySQL access blocked.",
+			},
+		},
+	})
+	result := evaluator.EvaluateResourceRead("mysql://root:password@prod:3306/db")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for mysql:// URI, got %s", result.Decision)
+	}
+}
+
+func TestResourcePolicy_RedisSchemeBlock(t *testing.T) {
+	evaluator := NewPolicyEvaluator(&MCPPolicy{
+		Defaults: MCPDefaults{Decision: policy.DecisionAudit},
+		ResourceRules: []ResourceRule{
+			{
+				ID:       "block-redis",
+				Match:    ResourceMatch{Scheme: "redis"},
+				Decision: policy.DecisionBlock,
+				Reason:   "Redis access blocked.",
+			},
+		},
+	})
+	result := evaluator.EvaluateResourceRead("redis://default:password@prod-redis:6379/0")
+	if result.Decision != "BLOCK" {
+		t.Errorf("expected BLOCK for redis:// URI, got %s", result.Decision)
+	}
+}

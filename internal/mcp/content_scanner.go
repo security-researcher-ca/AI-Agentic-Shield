@@ -28,17 +28,17 @@ const (
 
 // ContentFinding records one detected sensitive data signal in an argument value.
 type ContentFinding struct {
-	Signal    ContentSignal `json:"signal"`
-	Detail    string        `json:"detail"`
-	ArgName   string        `json:"arg_name"`
-	MatchLen  int           `json:"match_len,omitempty"`
+	Signal   ContentSignal `json:"signal"`
+	Detail   string        `json:"detail"`
+	ArgName  string        `json:"arg_name"`
+	MatchLen int           `json:"match_len,omitempty"`
 }
 
 // ContentScanResult is the result of scanning tool call arguments.
 type ContentScanResult struct {
-	ToolName     string           `json:"tool_name"`
-	Blocked      bool             `json:"blocked"`
-	Findings     []ContentFinding `json:"findings,omitempty"`
+	ToolName string           `json:"tool_name"`
+	Blocked  bool             `json:"blocked"`
+	Findings []ContentFinding `json:"findings,omitempty"`
 }
 
 // ScanToolCallContent checks all argument values of a tool call for
@@ -175,14 +175,14 @@ func scanArgumentValue(result *ContentScanResult, argName, text string) {
 // ── Compiled patterns ──────────────────────────────────────────────────────
 
 var (
-	privateKeyRe   = regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----`)
-	awsAccessKeyRe = regexp.MustCompile(`AKIA[0-9A-Z]{16}`)
-	awsSecretRe    = regexp.MustCompile(`(?i)(aws_secret_access_key|aws_access_key_id|aws_session_token)\s*[=:]\s*\S{16,}`)
-	githubTokenRe  = regexp.MustCompile(`gh[ps]_[A-Za-z0-9]{36}`)
-	bearerTokenRe  = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9_\-.]{20,}`)
-	basicAuthRe    = regexp.MustCompile(`https?://[^:]+:[^@]+@`)
-	slackTokenRe   = regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*`)
-	stripeKeyRe    = regexp.MustCompile(`sk_live_[0-9a-zA-Z]{24}`)
+	privateKeyRe    = regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY( BLOCK)?-----`)
+	awsAccessKeyRe  = regexp.MustCompile(`AKIA[0-9A-Z]{16}`)
+	awsSecretRe     = regexp.MustCompile(`(?i)(aws_secret_access_key|aws_access_key_id|aws_session_token)\s*[=:]\s*\S{16,}`)
+	githubTokenRe   = regexp.MustCompile(`gh[ps]_[A-Za-z0-9]{36}`)
+	bearerTokenRe   = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9_\-.]{20,}`)
+	basicAuthRe     = regexp.MustCompile(`https?://[^:]+:[^@]+@`)
+	slackTokenRe    = regexp.MustCompile(`xox[baprs]-[0-9]{10,13}-[0-9]{10,13}[a-zA-Z0-9-]*`)
+	stripeKeyRe     = regexp.MustCompile(`sk_live_[0-9a-zA-Z]{24}`)
 	genericSecretRe = regexp.MustCompile(`(?i)(api_key|apikey|api-key|secret_key|secretkey|secret-key|access_token|auth_token|private_key)\s*[=:]\s*['"]?[A-Za-z0-9_\-/+=]{16,}['"]?`)
 
 	envLineRe = regexp.MustCompile(`(?i)^[A-Z_]{2,}=\S+`)
@@ -190,8 +190,8 @@ var (
 
 // Thresholds
 const (
-	minBase64BlobLen = 200  // characters — roughly 150 bytes decoded
-	minHighEntropyLen = 100 // characters for standalone high-entropy check
+	minBase64BlobLen     = 200 // characters — roughly 150 bytes decoded
+	minHighEntropyLen    = 100 // characters for standalone high-entropy check
 	highEntropyThreshold = 4.5 // bits per character (English text ~3.5, random ~5.5)
 )
 
