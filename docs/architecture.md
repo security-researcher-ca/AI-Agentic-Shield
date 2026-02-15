@@ -2,17 +2,25 @@
 
 ## System Overview
 
+AgentShield mediates two communication channels: **shell commands** and **MCP tool calls**.
+
 ```mermaid
 flowchart TB
     Agent["AI Agent\n(Windsurf / Claude Code / Cursor)"]
     AS["AgentShield Gateway"]
     OS["Operating System"]
+    MCP["MCP Server\n(filesystem, GitHub, etc.)"]
     Log["Audit Log\n(audit.jsonl)"]
 
     Agent -->|"shell command"| AS
     AS -->|"ALLOW / AUDIT"| OS
     AS -->|"BLOCK"| Agent
     AS -->|"every decision"| Log
+
+    Agent -->|"MCP tool call\n(JSON-RPC)"| MCPP
+    MCPP -->|"ALLOW / AUDIT"| MCP
+    MCPP -->|"BLOCK"| Agent
+    MCPP -->|"every decision"| Log
 
     subgraph AgentShield
         direction TB
@@ -23,6 +31,13 @@ flowchart TB
         Redact["Secret\nRedaction"]
 
         Unicode --> Norm --> Pipeline --> Policy --> Redact
+    end
+
+    subgraph MCPP["MCP Proxy"]
+        direction TB
+        DescScan["Tool Description\nPoisoning Scanner"]
+        MCPPolicy["MCP Policy Engine\n(blocked tools + rules)"]
+        DescScan --> MCPPolicy
     end
 
     AS --- AgentShield
@@ -135,9 +150,11 @@ flowchart TD
 | `internal/policy` | Policy engine, rule loading, pack merging |
 | `internal/analyzer` | Multi-layer analyzer pipeline (regex, structural, semantic, dataflow, stateful) |
 | `internal/guardian` | Prompt injection detection (9 heuristic signals) |
+| `internal/mcp` | MCP proxy, policy engine, JSON-RPC parser, description poisoning scanner |
 | `internal/taxonomy` | Security taxonomy loader and compliance mapping |
 | `internal/unicode` | Unicode smuggling detection |
 | `internal/redact` | Secret redaction for audit logs |
+| `internal/cli` | CLI commands (`run`, `hook`, `setup`, `mcp-proxy`, `setup mcp`) |
 
 ## Agent Action Security Taxonomy
 

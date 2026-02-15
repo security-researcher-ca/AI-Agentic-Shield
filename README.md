@@ -38,11 +38,14 @@ agentshield setup windsurf   # Windsurf (Cascade Hooks)
 agentshield setup cursor     # Cursor (Cursor Hooks)
 agentshield setup openclaw   # OpenClaw (Agent Bootstrap Hook)
 
+# Set up MCP proxy (wraps all detected MCP servers)
+agentshield setup mcp
+
 # Or view all options
 agentshield setup
 ```
 
-That's it — the hook intercepts every agent command and blocks dangerous ones automatically.
+That's it — shell commands and MCP tool calls are both intercepted and evaluated automatically.
 
 ## How It Works
 
@@ -111,8 +114,9 @@ AgentShield uses `~/.agentshield/` for runtime data:
 
 ```
 ~/.agentshield/
-├── audit.jsonl      # Append-only audit log (auto-created)
-└── packs/           # Policy packs (installed via `agentshield setup --install`)
+├── audit.jsonl        # Append-only audit log (auto-created)
+├── mcp-policy.yaml    # MCP proxy policy (auto-created by setup mcp)
+└── packs/             # Policy packs (installed via `agentshield setup --install`)
     ├── terminal-safety.yaml
     ├── secrets-pii.yaml
     ├── network-egress.yaml
@@ -145,7 +149,10 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 ## Security Highlights
 
 - **6-layer analysis** — Regex, Structural (AST), Semantic, Dataflow, Stateful, Guardian
-- **100% precision / 96.2% recall** across 123 threat test cases ([details](docs/accuracy.md))
+- **MCP tool call mediation** — intercepts `tools/call` requests and blocks dangerous tool invocations
+- **Tool description poisoning detection** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration, and cross-tool shadowing ([details](docs/mcp-mediation.md#tool-description-poisoning-detection))
+- **100% precision / 96.2% recall** across 123 shell threat test cases ([details](docs/accuracy.md))
+- **24/24 MCP red-team cases** pass (blocked tools, credential access, system writes, evasion)
 - **Protected paths** — `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`
 - **Prompt injection detection** — instruction overrides, obfuscation, base64 payloads
 - **Unicode smuggling detection** — homoglyphs, zero-width chars, bidi overrides
@@ -163,7 +170,7 @@ AgentShield is a **user-space command wrapper**, not a kernel-level enforcement 
 | **Agent can modify policy files** | Policy packs in `~/.agentshield/packs/` are user-writable YAML. |
 | **Only intercepts routed commands** | Commands not routed through `agentshield run --` are not intercepted. If an agent bypasses the wrapper (e.g., direct syscall, spawning a child process outside the hook), AgentShield won't see it. |
 | **Not a network firewall** | AgentShield analyzes command strings. It does not inspect network packets or block outbound connections at the OS level. |
-| **Not an LLM guardrail** | AgentShield does not filter prompts sent to models or inspect model outputs. It operates at the shell command layer only. |
+| **Not an LLM guardrail** | AgentShield does not filter prompts sent to models or inspect model outputs. It operates at the shell command and MCP tool call layers. |
 
 These limitations are inherent to the user-space wrapper approach. Mitigations include running audit log forwarding to a remote store, setting file permissions on policy files, and combining AgentShield with OS-level controls (e.g., macOS TCC, SELinux, network firewalls).
 
