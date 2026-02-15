@@ -273,6 +273,23 @@ func (p *Proxy) evaluateToolCall(msg *Message) (bool, []byte) {
 		}
 	}
 
+	// If still not blocked, check for config file write attempts
+	if result.Decision != "BLOCK" {
+		guardResult := CheckConfigGuard(params.Name, params.Arguments)
+		if guardResult.Blocked {
+			result.Decision = "BLOCK"
+			result.TriggeredRules = append(result.TriggeredRules, "config-file-guard")
+			for _, f := range guardResult.Findings {
+				result.Reasons = append(result.Reasons, "["+f.Category+"] "+f.Reason+" (path: "+f.Path+")")
+			}
+			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by config guard: %s (%d findings)\n",
+				params.Name, len(guardResult.Findings))
+			for _, f := range guardResult.Findings {
+				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s (path: %s)\n", f.Category, f.Reason, f.Path)
+			}
+		}
+	}
+
 	// Log the audit entry
 	if p.cfg.OnAudit != nil {
 		p.cfg.OnAudit(AuditEntry{

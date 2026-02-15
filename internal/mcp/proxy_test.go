@@ -3,7 +3,9 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -506,6 +508,58 @@ func TestProxy_ContentScanBlocksExfiltration(t *testing.T) {
 	}
 	if !foundContentRule {
 		t.Errorf("expected 'argument-content-scan' in triggered rules, got: %v", audited[0].TriggeredRules)
+	}
+}
+
+func TestProxy_ConfigGuardBlocksIDEConfigWrite(t *testing.T) {
+	evaluator := NewPolicyEvaluator(testProxyPolicy())
+	home := os.Getenv("HOME")
+
+	// write_file to ~/.bashrc — policy allows it but config guard should block
+	clientInput := fmt.Sprintf(`{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"write_file","arguments":{"path":"%s/.bashrc","content":"alias rm='rm -rf /'\n"}}}`, home) + "\n"
+
+	var audited []AuditEntry
+	var mu sync.Mutex
+
+	proxy := NewProxy(ProxyConfig{
+		Evaluator: evaluator,
+		OnAudit: func(e AuditEntry) {
+			mu.Lock()
+			defer mu.Unlock()
+			audited = append(audited, e)
+		},
+		Stderr: io.Discard,
+	})
+
+	clientReader := strings.NewReader(clientInput)
+	clientWriter := &bytes.Buffer{}
+	serverBuf := &bytes.Buffer{}
+	serverWriter := newNopWriteCloser(serverBuf)
+
+	proxy.RunWithIO(clientReader, clientWriter, strings.NewReader(""), serverWriter)
+
+	// Should be blocked — not forwarded to server
+	if serverBuf.Len() != 0 {
+		t.Error("expected config guard to block write_file to .bashrc")
+	}
+
+	// Audit should have config-file-guard rule
+	mu.Lock()
+	defer mu.Unlock()
+	if len(audited) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audited))
+	}
+	if audited[0].Decision != "BLOCK" {
+		t.Errorf("expected BLOCK, got %s", audited[0].Decision)
+	}
+	foundGuard := false
+	for _, rule := range audited[0].TriggeredRules {
+		if rule == "config-file-guard" {
+			foundGuard = true
+		}
+	}
+	if !foundGuard {
+		t.Errorf("expected 'config-file-guard' in triggered rules, got: %v", audited[0].TriggeredRules)
 	}
 }
 

@@ -197,10 +197,41 @@ func scanCommand(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\n  Content scanner: %d/2 passed\n\n", contentPass)
 
+	// ── Config guard tests ───────────────────────────────────────
+
+	fmt.Println("─── MCP Config File Guard ─────────────────────────────")
+
+	guardPass := 0
+
+	// Should block: write to shell startup file
+	guardResult := mcp.CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    os.Getenv("HOME") + "/.bashrc",
+		"content": "alias rm='rm -rf /'\n",
+	})
+	if guardResult.Blocked {
+		fmt.Println("  ✅ Shell config write blocked:  .bashrc protected")
+		guardPass++
+	} else {
+		fmt.Println("  ❌ Shell config write NOT blocked")
+	}
+
+	// Should pass: normal project file
+	cleanGuardResult := mcp.CheckConfigGuard("write_file", map[string]interface{}{
+		"path":    "/tmp/readme.md",
+		"content": "# Hello",
+	})
+	if !cleanGuardResult.Blocked {
+		fmt.Println("  ✅ Project file write allowed:  no false positive")
+		guardPass++
+	} else {
+		fmt.Printf("  ❌ Project file false positive:  %d findings\n", len(cleanGuardResult.Findings))
+	}
+	fmt.Printf("\n  Config guard: %d/2 passed\n\n", guardPass)
+
 	// ── Summary ──────────────────────────────────────────────────
 
-	total := len(shellCases) + len(mcpCases) + 2 + 2
-	passed := shellPass + mcpPass + descPass + contentPass
+	total := len(shellCases) + len(mcpCases) + 2 + 2 + 2
+	passed := shellPass + mcpPass + descPass + contentPass + guardPass
 	failed := total - passed
 
 	fmt.Println("═══════════════════════════════════════════════════════")

@@ -26,18 +26,19 @@ AgentShield can intercept and evaluate [Model Context Protocol](https://modelcon
    - A **blocked tools list** (always-blocked tool names)
    - **Fine-grained rules** with glob/regex tool name matching and argument pattern matching
 4. **Argument content scanning** — even if the tool name and argument patterns pass policy, AgentShield scans all argument *values* for secrets, credentials, and encoded data that may indicate exfiltration.
-5. **Decision:**
+5. **Config file guard** — blocks writes to IDE configs, AgentShield’s own policy files, shell dotfiles, and package manager configs regardless of tool name or policy rules.
+6. **Decision:**
    - `BLOCK` → proxy returns a JSON-RPC error to the IDE; the request never reaches the server.
    - `AUDIT` → request is forwarded to the server; the decision is logged.
    - `ALLOW` → request is forwarded silently.
-6. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
-7. All other MCP messages (`initialize`, notifications) pass through transparently.
+7. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
+8. All other MCP messages (`initialize`, notifications) pass through transparently.
 
 ### What is mediated
 
 | Message type | Mediated? | Notes |
 |---|---|---|
-| `tools/call` | **Yes** | Tool name + argument patterns evaluated against policy; argument values scanned for secrets/credentials |
+| `tools/call` | **Yes** | Tool name + argument patterns evaluated against policy; argument values scanned for secrets/credentials; config file writes blocked |
 | `tools/list` | **Yes** | Server→client responses scanned for tool description poisoning; poisoned tools hidden |
 | `resources/read` | No | Deferred to future version |
 | `initialize` | No | Passes through |
@@ -172,6 +173,28 @@ The WhatsApp MCP exfiltration attack (Apr 2025): a poisoned `add` tool tricks th
 
 ---
 
+## Config File Write Protection
+
+The proxy blocks any tool call that attempts to write to protected config files. This is the **IDEsaster defense** — preventing agents from disabling security by modifying IDE hooks, MCP configs, or AgentShield’s own policy.
+
+### Protected categories
+
+| Category | Paths protected | Attack prevented |
+|---|---|---|
+| `agentshield-config` | `~/.agentshield/**` | Agent disables AgentShield by rewriting policy |
+| `ide-hooks` | `~/.codeium/windsurf/hooks.json`, `~/.cursor/hooks.json`, `~/.openclaw/hooks/agentshield/**` | Agent removes command interception hooks |
+| `ide-mcp-config` | `~/.cursor/mcp.json`, Claude Desktop config | Agent injects malicious MCP servers |
+| `shell-config` | `~/.bashrc`, `~/.zshrc`, `~/.profile`, etc. | Agent runs code on every new shell |
+| `package-config` | `~/.npmrc`, `~/.pip/pip.conf`, `~/.pypirc`, `~/.yarnrc`, etc. | Agent redirects package installs to malicious registry |
+| `git-config` | `~/.gitconfig` | Agent sets malicious hooks/aliases |
+| `ssh-config` | `~/.ssh/config` | Agent redirects connections through attacker proxy |
+| `docker-config` | `~/.docker/config.json` | Agent leaks registry credentials |
+| `kube-config` | `~/.kube/config` | Agent redirects cluster access |
+
+This guard runs independently of policy rules — it cannot be disabled by modifying `mcp-policy.yaml`.
+
+---
+
 ## Tool Description Poisoning Detection
 
 The proxy scans every `tools/list` response for **tool description poisoning** — the #1 MCP attack vector in 2025 (WhatsApp MCP exfiltration, GitHub MCP data heist, Invariant Labs research).
@@ -208,6 +231,7 @@ Every hidden tool is recorded in the audit log with:
 | `internal/mcp/proxy.go` | Stdio proxy (client ↔ server bridge) + description filtering + content scanning |
 | `internal/mcp/description_scanner.go` | Tool description poisoning heuristics (5 signal categories) |
 | `internal/mcp/content_scanner.go` | Argument content scanning for secrets/exfiltration (11 signal types) |
+| `internal/mcp/config_guard.go` | Config file write protection (9 protected categories) |
 | `internal/cli/mcp_proxy.go` | `agentshield mcp-proxy` CLI command |
 | `internal/cli/setup_mcp.go` | `agentshield setup mcp` IDE config rewriting |
 | `internal/mcp/testdata/echo_server.go` | Test MCP server for integration tests |
