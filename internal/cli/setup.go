@@ -57,6 +57,8 @@ IDE-specific setup:
   agentshield setup cursor --disable      # remove Cursor Hooks
   agentshield setup openclaw              # install OpenClaw Hook
   agentshield setup openclaw --disable    # remove OpenClaw Hook
+  agentshield setup mcp                   # wrap MCP servers with proxy
+  agentshield setup mcp --disable         # restore original MCP configs
 
 General setup:
   agentshield setup --install   # install wrapper + policy packs
@@ -605,11 +607,23 @@ func printSetupInstructions() {
 	fmt.Println("  agentshield pack list                # show policy packs")
 	fmt.Println()
 
+	fmt.Println("─── MCP Servers ──────────────────────────────────────")
+	fmt.Println()
+	fmt.Println("  Wraps MCP server configs to route tool calls through")
+	fmt.Println("  AgentShield's MCP proxy for policy evaluation.")
+	fmt.Println()
+	fmt.Println("    agentshield setup mcp")
+	fmt.Println()
+	fmt.Println("  Or use the proxy directly:")
+	fmt.Println("    agentshield mcp-proxy -- npx -y @modelcontextprotocol/server-filesystem /path")
+	fmt.Println()
+
 	fmt.Println("─── Disable / Re-enable ──────────────────────────────")
 	fmt.Println()
 	fmt.Println("  # Remove hooks (permanent until re-enabled):")
 	fmt.Println("  agentshield setup windsurf --disable")
 	fmt.Println("  agentshield setup cursor   --disable")
+	fmt.Println("  agentshield setup mcp      --disable")
 	fmt.Println()
 	fmt.Println("  # Quick bypass (env var, current session only):")
 	fmt.Println("  export AGENTSHIELD_BYPASS=1    # temporarily disable")
@@ -763,4 +777,5 @@ func installPacks(srcDir, dstDir string) int {
 	}
 	return installed
 }
+
 // test comment

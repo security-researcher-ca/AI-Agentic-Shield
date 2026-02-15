@@ -1,0 +1,111 @@
+// Package mcp provides types and utilities for intercepting and evaluating
+// Model Context Protocol (MCP) JSON-RPC messages. AgentShield uses these to
+// mediate tool calls between AI agents and MCP servers.
+package mcp
+
+import "encoding/json"
+
+// --- JSON-RPC base types (MCP uses JSON-RPC 2.0) ---
+
+// Message is the top-level envelope for any JSON-RPC 2.0 message.
+// We parse into this first, then dispatch based on the Method field.
+type Message struct {
+	JSONRPC string           `json:"jsonrpc"`
+	ID      *json.RawMessage `json:"id,omitempty"`      // present for requests & responses
+	Method  string           `json:"method,omitempty"`   // present for requests & notifications
+	Params  json.RawMessage  `json:"params,omitempty"`   // present for requests & notifications
+	Result  json.RawMessage  `json:"result,omitempty"`   // present for success responses
+	Error   *RPCError        `json:"error,omitempty"`    // present for error responses
+}
+
+// RPCError is a JSON-RPC 2.0 error object.
+type RPCError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// --- MCP tool call types ---
+
+// CallToolParams represents the params of a tools/call request.
+type CallToolParams struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments,omitempty"`
+}
+
+// CallToolResult represents the result of a tools/call response.
+type CallToolResult struct {
+	Content []ContentItem `json:"content"`
+	IsError bool          `json:"isError,omitempty"`
+}
+
+// ContentItem is one piece of content in a tool result.
+type ContentItem struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// --- MCP tool listing types ---
+
+// ToolDefinition describes a single tool exposed by an MCP server.
+type ToolDefinition struct {
+	Name        string          `json:"name"`
+	Title       string          `json:"title,omitempty"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
+}
+
+// ListToolsResult is the result of a tools/list response.
+type ListToolsResult struct {
+	Tools      []ToolDefinition `json:"tools"`
+	NextCursor string           `json:"nextCursor,omitempty"`
+}
+
+// --- Message type classification ---
+
+// MessageKind classifies a parsed JSON-RPC message.
+type MessageKind int
+
+const (
+	KindUnknown      MessageKind = iota
+	KindToolCall                         // tools/call request
+	KindToolList                         // tools/list request
+	KindNotification                     // any notification (no id)
+	KindResponse                         // any response (has id, has result or error)
+	KindOtherRequest                     // any other request (has id + method)
+)
+
+// String returns a human-readable label for the message kind.
+func (k MessageKind) String() string {
+	switch k {
+	case KindToolCall:
+		return "tools/call"
+	case KindToolList:
+		return "tools/list"
+	case KindNotification:
+		return "notification"
+	case KindResponse:
+		return "response"
+	case KindOtherRequest:
+		return "other-request"
+	default:
+		return "unknown"
+	}
+}
+
+// --- Well-known MCP methods ---
+
+const (
+	MethodToolsCall = "tools/call"
+	MethodToolsList = "tools/list"
+)
+
+// --- JSON-RPC error codes ---
+
+const (
+	RPCParseError     = -32700
+	RPCInvalidRequest = -32600
+	RPCMethodNotFound = -32601
+	RPCInvalidParams  = -32602
+	RPCInternalError  = -32603
+)

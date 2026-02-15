@@ -6,6 +6,8 @@ AI coding agents (Windsurf, Cursor, Claude Code, OpenClaw, etc.) execute shell c
 
 AgentShield is a deterministic policy gate that sits between the agent and the OS. Every shell command is evaluated through a 6-layer analyzer pipeline *before* execution. Dangerous commands are blocked. Safe commands pass through. Everything is logged.
 
+AgentShield also mediates **MCP (Model Context Protocol) tool calls** — intercepting agent-to-server communication and blocking dangerous tool invocations before they reach the server.
+
 This project is one attempt at the "complete mediation" pattern [recommended by OWASP](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) for mitigating Excessive Agency (LLM06) in LLM applications.
 
 > **📝 Blog post:** [AI Agents Have Root Access to Your Machine — And Nobody's Watching](https://medium.com/@gzxuexi/ai-agents-have-root-access-to-your-machine-and-nobodys-watching-9965606176a4) — background research, real-world incidents, and OWASP alignment.
@@ -169,7 +171,7 @@ These limitations are inherent to the user-space wrapper approach. Mitigations i
 
 AgentShield currently mediates **shell commands**. The threat surface for AI agents is broader. Planned and exploratory directions:
 
-- **MCP communication mediation** — Intercept and evaluate [Model Context Protocol](https://modelcontextprotocol.io/) tool calls between agents and MCP servers. MCP is becoming the standard for agent-to-tool communication, and [unsecured MCP servers are already a real risk](https://www.darkreading.com/vulnerabilities-threats/2000-mcp-servers-security).
+- **~~MCP communication mediation~~** ✅ — Intercept and evaluate [Model Context Protocol](https://modelcontextprotocol.io/) tool calls between agents and MCP servers via `agentshield mcp-proxy`. See [MCP Mediation docs](docs/mcp-mediation.md).
 - **File-write policy** — Evaluate file creation and modification operations (not just shell commands), especially writes to sensitive config files (`.cursor/mcp.json`, `.vscode/tasks.json`, crontabs).
 - **Remote audit log forwarding** — Ship `audit.jsonl` to a remote store (syslog, S3, SIEM) so agents cannot tamper with the trail.
 - **OS-level enforcement** — Explore eBPF-based or sandbox-based approaches for commands that bypass the wrapper.
@@ -182,6 +184,7 @@ Contributions and ideas are welcome — [open an issue](https://github.com/gzhol
 
 - [Policy Authoring Guide](docs/policy-guide.md) — Rule syntax, analyzer layers, custom packs, recipes
 - [Architecture & Pipeline Details](docs/architecture.md)
+- [MCP Mediation](docs/mcp-mediation.md) — MCP proxy, policy format, IDE setup
 - [Accuracy Baseline & Red-Team Results](docs/accuracy.md)
 - [OWASP LLM Top 10 Compliance Mapping](compliance/indexes/owasp-llm-2025.md)
 
