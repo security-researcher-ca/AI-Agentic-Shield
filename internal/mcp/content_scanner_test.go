@@ -82,8 +82,9 @@ func TestContentScan_BasicAuthURL(t *testing.T) {
 }
 
 func TestContentScan_StripeKey(t *testing.T) {
+	stripeKey := "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc"
 	result := ScanToolCallContent("payment", map[string]interface{}{
-		"key": "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc",
+		"key": stripeKey,
 	})
 	if !result.Blocked {
 		t.Fatal("expected blocked — Stripe secret key")
@@ -159,8 +160,9 @@ func TestContentScan_WhatsAppExfiltration(t *testing.T) {
 }
 
 func TestContentScan_SlackToken(t *testing.T) {
+	slackToken := "xoxb-" + "1234567890123-" + "1234567890123-" + "ABCdefGHIjklMNOpqrSTUvwx"
 	result := ScanToolCallContent("notify", map[string]interface{}{
-		"token": "xoxb-" + "1234567890123-" + "1234567890123-" + "ABCdefGHIjklMNOpqrSTUvwx",
+		"token": slackToken,
 	})
 	if !result.Blocked {
 		t.Fatal("expected blocked — Slack token")
@@ -235,10 +237,11 @@ func TestContentScan_HighEntropyString(t *testing.T) {
 }
 
 func TestContentScan_MultipleSecretsInOneCall(t *testing.T) {
+	stripeKey := "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc"
 	result := ScanToolCallContent("exfil", map[string]interface{}{
 		"aws_key":  "AKIAIOSFODNN7EXAMPLE",
 		"gh_token": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",
-		"stripe":   "sk_" + "live_" + "4eC39HqLyjWDarjtT1zdp7dc",
+		"stripe":   stripeKey,
 	})
 	if !result.Blocked {
 		t.Fatal("expected blocked — multiple secrets")
