@@ -11,11 +11,11 @@ import "encoding/json"
 // We parse into this first, then dispatch based on the Method field.
 type Message struct {
 	JSONRPC string           `json:"jsonrpc"`
-	ID      *json.RawMessage `json:"id,omitempty"`      // present for requests & responses
-	Method  string           `json:"method,omitempty"`   // present for requests & notifications
-	Params  json.RawMessage  `json:"params,omitempty"`   // present for requests & notifications
-	Result  json.RawMessage  `json:"result,omitempty"`   // present for success responses
-	Error   *RPCError        `json:"error,omitempty"`    // present for error responses
+	ID      *json.RawMessage `json:"id,omitempty"`     // present for requests & responses
+	Method  string           `json:"method,omitempty"` // present for requests & notifications
+	Params  json.RawMessage  `json:"params,omitempty"` // present for requests & notifications
+	Result  json.RawMessage  `json:"result,omitempty"` // present for success responses
+	Error   *RPCError        `json:"error,omitempty"`  // present for error responses
 }
 
 // RPCError is a JSON-RPC 2.0 error object.
@@ -68,11 +68,12 @@ type MessageKind int
 
 const (
 	KindUnknown      MessageKind = iota
-	KindToolCall                         // tools/call request
-	KindToolList                         // tools/list request
-	KindNotification                     // any notification (no id)
-	KindResponse                         // any response (has id, has result or error)
-	KindOtherRequest                     // any other request (has id + method)
+	KindToolCall                 // tools/call request
+	KindToolList                 // tools/list request
+	KindResourceRead             // resources/read request
+	KindNotification             // any notification (no id)
+	KindResponse                 // any response (has id, has result or error)
+	KindOtherRequest             // any other request (has id + method)
 )
 
 // String returns a human-readable label for the message kind.
@@ -82,6 +83,8 @@ func (k MessageKind) String() string {
 		return "tools/call"
 	case KindToolList:
 		return "tools/list"
+	case KindResourceRead:
+		return "resources/read"
 	case KindNotification:
 		return "notification"
 	case KindResponse:
@@ -96,9 +99,17 @@ func (k MessageKind) String() string {
 // --- Well-known MCP methods ---
 
 const (
-	MethodToolsCall = "tools/call"
-	MethodToolsList = "tools/list"
+	MethodToolsCall     = "tools/call"
+	MethodToolsList     = "tools/list"
+	MethodResourcesRead = "resources/read"
 )
+
+// --- MCP resource types ---
+
+// ReadResourceParams represents the params of a resources/read request.
+type ReadResourceParams struct {
+	URI string `json:"uri"`
+}
 
 // --- JSON-RPC error codes ---
 

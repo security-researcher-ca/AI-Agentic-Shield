@@ -56,8 +56,20 @@ func TestParseMessage_Notification(t *testing.T) {
 	}
 }
 
-func TestParseMessage_OtherRequest(t *testing.T) {
+func TestParseMessage_ResourceRead(t *testing.T) {
 	input := `{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"file:///tmp/foo"}}`
+
+	_, kind, err := ParseMessage([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != KindResourceRead {
+		t.Errorf("expected KindResourceRead, got %v", kind)
+	}
+}
+
+func TestParseMessage_OtherRequest(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":6,"method":"prompts/get","params":{"name":"test"}}`
 
 	_, kind, err := ParseMessage([]byte(input))
 	if err != nil {

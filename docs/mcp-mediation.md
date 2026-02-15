@@ -40,7 +40,7 @@ AgentShield can intercept and evaluate [Model Context Protocol](https://modelcon
 |---|---|---|
 | `tools/call` | **Yes** | Tool name + argument patterns evaluated against policy; argument values scanned for secrets/credentials; config file writes blocked |
 | `tools/list` | **Yes** | Server→client responses scanned for tool description poisoning; poisoned tools hidden |
-| `resources/read` | No | Deferred to future version |
+| `resources/read` | **Yes** | URI evaluated against blocked resources, resource rules, scheme matching, and config guard for `file://` URIs |
 | `initialize` | No | Passes through |
 | Notifications | No | Passes through |
 
@@ -170,6 +170,45 @@ Every argument value (including nested objects and arrays) is scanned against pa
 ### Real-world attack this stops
 
 The WhatsApp MCP exfiltration attack (Apr 2025): a poisoned `add` tool tricks the agent into reading `~/.ssh/id_rsa` and passing the content as a `sidenote` parameter. Even if the tool name `add` is allowed, the content scanner detects the SSH private key in the argument value and blocks the call.
+
+---
+
+## Resource Read Mediation
+
+The proxy intercepts `resources/read` requests and evaluates the resource URI against:
+
+1. **Blocked resources list** — exact or glob-matched URI patterns
+2. **Resource rules** — URI pattern, regex, or scheme-based matching
+3. **Config file guard** — `file://` URIs are checked against all protected config paths
+
+### Policy configuration
+
+```yaml
+# In mcp-policy.yaml
+blocked_resources:
+  - "secret://*"
+
+resource_rules:
+  - id: block-database
+    match:
+      scheme: "postgres"     # blocks postgres://...
+    decision: "BLOCK"
+    reason: "Direct database access is blocked."
+
+  - id: block-internal-api
+    match:
+      uri_regex: "internal\\.corp\\.com"
+    decision: "BLOCK"
+    reason: "Internal API resources blocked."
+```
+
+### Match types
+
+| Field | Type | Description |
+|---|---|---|
+| `uri_pattern` | Glob | Glob pattern against full URI |
+| `uri_regex` | Regex | Regex against full URI |
+| `scheme` | Exact | Matches URI scheme (e.g., `postgres`, `file`, `secret`) |
 
 ---
 

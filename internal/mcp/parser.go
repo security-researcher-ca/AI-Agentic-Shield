@@ -35,6 +35,8 @@ func ClassifyMessage(msg *Message) MessageKind {
 			return KindToolCall
 		case MethodToolsList:
 			return KindToolList
+		case MethodResourcesRead:
+			return KindResourceRead
 		default:
 			return KindOtherRequest
 		}
@@ -59,6 +61,25 @@ func ExtractToolCall(msg *Message) (*CallToolParams, error) {
 	}
 	if params.Name == "" {
 		return nil, fmt.Errorf("tools/call params missing required field 'name'")
+	}
+	return &params, nil
+}
+
+// ExtractResourceRead extracts the resource URI from a resources/read request.
+func ExtractResourceRead(msg *Message) (*ReadResourceParams, error) {
+	if msg.Method != MethodResourcesRead {
+		return nil, fmt.Errorf("not a resources/read request: method=%q", msg.Method)
+	}
+	if msg.Params == nil {
+		return nil, fmt.Errorf("resources/read request has no params")
+	}
+
+	var params ReadResourceParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return nil, fmt.Errorf("failed to parse resources/read params: %w", err)
+	}
+	if params.URI == "" {
+		return nil, fmt.Errorf("resources/read params missing required field 'uri'")
 	}
 	return &params, nil
 }

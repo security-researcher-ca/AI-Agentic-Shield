@@ -139,6 +139,14 @@ func (p *Proxy) proxyClientToServer(clientReader io.Reader, serverWriter io.Writ
 			}
 		}
 
+		if kind == KindResourceRead {
+			blocked, blockResp := p.evaluateResourceRead(msg)
+			if blocked {
+				writeLineToWriter(clientWriter, blockResp)
+				continue
+			}
+		}
+
 		// Forward all non-blocked messages to the server
 		writeLineToWriter(serverWriter, line)
 	}
@@ -242,6 +250,53 @@ func (p *Proxy) filterToolsListResponse(line []byte) []byte {
 		return nil
 	}
 	return out
+}
+
+// evaluateResourceRead evaluates a resources/read message against the MCP policy.
+// Returns (true, blockResponse) if blocked, or (false, nil) if allowed.
+func (p *Proxy) evaluateResourceRead(msg *Message) (bool, []byte) {
+	params, err := ExtractResourceRead(msg)
+	if err != nil {
+		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] warning: failed to extract resource read: %v\n", err)
+		return false, nil // fail open
+	}
+
+	result := p.cfg.Evaluator.EvaluateResourceRead(params.URI)
+
+	// Log the audit entry
+	if p.cfg.OnAudit != nil {
+		p.cfg.OnAudit(AuditEntry{
+			Timestamp:      time.Now().UTC().Format(time.RFC3339),
+			ToolName:       "resources/read",
+			Arguments:      map[string]interface{}{"uri": params.URI},
+			Decision:       string(result.Decision),
+			Flagged:        result.Decision == "BLOCK" || result.Decision == "AUDIT",
+			TriggeredRules: result.TriggeredRules,
+			Reasons:        result.Reasons,
+			Source:         "mcp-proxy",
+		})
+	}
+
+	if result.Decision == "BLOCK" {
+		reason := "Blocked by policy"
+		if len(result.Reasons) > 0 {
+			reason = result.Reasons[0]
+		}
+		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED resource read: %s — %s\n", params.URI, reason)
+
+		blockResp, err := NewBlockResponse(msg.ID, reason)
+		if err != nil {
+			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] error creating block response: %v\n", err)
+			return false, nil
+		}
+		return true, blockResp
+	}
+
+	if result.Decision == "AUDIT" {
+		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] AUDIT resource read: %s\n", params.URI)
+	}
+
+	return false, nil
 }
 
 // evaluateToolCall evaluates a tools/call message against the MCP policy

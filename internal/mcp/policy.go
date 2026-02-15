@@ -11,9 +11,11 @@ import (
 
 // MCPPolicy defines MCP-specific security policy loaded from YAML.
 type MCPPolicy struct {
-	Defaults     MCPDefaults `yaml:"defaults"`
-	BlockedTools []string    `yaml:"blocked_tools,omitempty"`
-	Rules        []MCPRule   `yaml:"rules,omitempty"`
+	Defaults         MCPDefaults    `yaml:"defaults"`
+	BlockedTools     []string       `yaml:"blocked_tools,omitempty"`
+	BlockedResources []string       `yaml:"blocked_resources,omitempty"`
+	Rules            []MCPRule      `yaml:"rules,omitempty"`
+	ResourceRules    []ResourceRule `yaml:"resource_rules,omitempty"`
 }
 
 // MCPDefaults defines the default decision for MCP tool calls.
@@ -27,6 +29,21 @@ type MCPRule struct {
 	Match    MCPMatch        `yaml:"match"`
 	Decision policy.Decision `yaml:"decision"`
 	Reason   string          `yaml:"reason"`
+}
+
+// ResourceRule defines a rule for resources/read requests.
+type ResourceRule struct {
+	ID       string          `yaml:"id"`
+	Match    ResourceMatch   `yaml:"match"`
+	Decision policy.Decision `yaml:"decision"`
+	Reason   string          `yaml:"reason"`
+}
+
+// ResourceMatch defines conditions for a resource rule.
+type ResourceMatch struct {
+	URIPattern string `yaml:"uri_pattern,omitempty"` // glob pattern on URI
+	URIRegex   string `yaml:"uri_regex,omitempty"`   // regex on URI
+	Scheme     string `yaml:"scheme,omitempty"`      // exact scheme match (file, postgres, etc.)
 }
 
 // MCPMatch defines the conditions for an MCP rule to trigger.
@@ -249,6 +266,108 @@ func splitPathPattern(pattern string) []string {
 		return nil
 	}
 	return strings.Split(pattern, "/")
+}
+
+// EvaluateResourceRead checks a resources/read URI against the MCP policy.
+func (e *PolicyEvaluator) EvaluateResourceRead(uri string) MCPEvalResult {
+	result := MCPEvalResult{
+		Decision:       e.policy.Defaults.Decision,
+		TriggeredRules: []string{},
+		Reasons:        []string{},
+	}
+
+	// Check blocked resources list
+	for _, blocked := range e.policy.BlockedResources {
+		if matchResourceURI(uri, blocked) {
+			return MCPEvalResult{
+				Decision:       policy.DecisionBlock,
+				TriggeredRules: []string{"blocked-resource:" + blocked},
+				Reasons:        []string{fmt.Sprintf("Resource URI %q matches blocked pattern %q", uri, blocked)},
+			}
+		}
+	}
+
+	// Evaluate resource rules
+	for _, rule := range e.policy.ResourceRules {
+		if matchResourceRule(uri, rule) {
+			if decisionSeverity(rule.Decision) > decisionSeverity(result.Decision) {
+				result.Decision = rule.Decision
+				result.TriggeredRules = []string{rule.ID}
+				result.Reasons = []string{rule.Reason}
+			} else if decisionSeverity(rule.Decision) == decisionSeverity(result.Decision) {
+				result.TriggeredRules = append(result.TriggeredRules, rule.ID)
+				result.Reasons = append(result.Reasons, rule.Reason)
+			}
+		}
+	}
+
+	// Check config guard on file:// URIs
+	if strings.HasPrefix(uri, "file://") {
+		path := strings.TrimPrefix(uri, "file://")
+		// Use config guard to check if the resource path is protected
+		guardResult := CheckConfigGuard("resources/read", map[string]interface{}{"path": path})
+		if guardResult.Blocked {
+			result.Decision = policy.DecisionBlock
+			result.TriggeredRules = append(result.TriggeredRules, "config-file-guard")
+			for _, f := range guardResult.Findings {
+				result.Reasons = append(result.Reasons, "["+f.Category+"] "+f.Reason)
+			}
+		}
+	}
+
+	return result
+}
+
+// matchResourceURI checks if a URI matches a blocked resource pattern.
+func matchResourceURI(uri, pattern string) bool {
+	if strings.Contains(pattern, "*") {
+		matched, _ := filepath.Match(pattern, uri)
+		if matched {
+			return true
+		}
+		// Also try glob matching on the path portion
+		if strings.Contains(pattern, "**") {
+			vParts := splitPath(uri)
+			pParts := splitPathPattern(pattern)
+			return globMatch(vParts, pParts)
+		}
+		return false
+	}
+	return uri == pattern
+}
+
+// matchResourceRule checks if a URI matches a resource rule.
+func matchResourceRule(uri string, rule ResourceRule) bool {
+	m := rule.Match
+	matched := false
+	specified := false
+
+	if m.URIPattern != "" {
+		specified = true
+		if matchResourceURI(uri, m.URIPattern) {
+			matched = true
+		}
+	}
+
+	if m.URIRegex != "" {
+		specified = true
+		re, err := regexp.Compile(m.URIRegex)
+		if err == nil && re.MatchString(uri) {
+			matched = true
+		}
+	}
+
+	if m.Scheme != "" {
+		specified = true
+		if strings.HasPrefix(uri, m.Scheme+"://") {
+			matched = true
+		}
+	}
+
+	if !specified {
+		return false
+	}
+	return matched
 }
 
 func decisionSeverity(d policy.Decision) int {

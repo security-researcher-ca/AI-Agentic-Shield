@@ -589,6 +589,90 @@ func TestProxy_ContentScanAllowsClean(t *testing.T) {
 	}
 }
 
+func TestProxy_ResourceReadBlocked(t *testing.T) {
+	pol := testProxyPolicy()
+	pol.BlockedResources = []string{"secret://*"}
+	pol.ResourceRules = []ResourceRule{
+		{
+			ID:       "block-postgres",
+			Match:    ResourceMatch{Scheme: "postgres"},
+			Decision: "BLOCK",
+			Reason:   "Direct database access is blocked.",
+		},
+	}
+	evaluator := NewPolicyEvaluator(pol)
+
+	// resources/read for a postgres URI should be blocked
+	clientInput := `{"jsonrpc":"2.0","id":50,"method":"resources/read","params":{"uri":"postgres://user:pass@prod-db:5432/mydb"}}` + "\n"
+
+	var audited []AuditEntry
+	var mu sync.Mutex
+
+	proxy := NewProxy(ProxyConfig{
+		Evaluator: evaluator,
+		OnAudit: func(e AuditEntry) {
+			mu.Lock()
+			defer mu.Unlock()
+			audited = append(audited, e)
+		},
+		Stderr: io.Discard,
+	})
+
+	clientReader := strings.NewReader(clientInput)
+	clientWriter := &bytes.Buffer{}
+	serverBuf := &bytes.Buffer{}
+	serverWriter := newNopWriteCloser(serverBuf)
+
+	proxy.RunWithIO(clientReader, clientWriter, strings.NewReader(""), serverWriter)
+
+	// Should be blocked — not forwarded to server
+	if serverBuf.Len() != 0 {
+		t.Error("expected resources/read to postgres:// to be blocked")
+	}
+
+	// Should get a block response back to client
+	if clientWriter.Len() == 0 {
+		t.Fatal("expected block response sent to client")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(audited) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(audited))
+	}
+	if audited[0].Decision != "BLOCK" {
+		t.Errorf("expected BLOCK, got %s", audited[0].Decision)
+	}
+	if audited[0].ToolName != "resources/read" {
+		t.Errorf("expected tool_name 'resources/read', got %s", audited[0].ToolName)
+	}
+}
+
+func TestProxy_ResourceReadAllowed(t *testing.T) {
+	evaluator := NewPolicyEvaluator(testProxyPolicy())
+
+	// resources/read for a safe URI should be forwarded
+	clientInput := `{"jsonrpc":"2.0","id":51,"method":"resources/read","params":{"uri":"https://docs.example.com/readme"}}` + "\n"
+	serverResponse := `{"jsonrpc":"2.0","id":51,"result":{"contents":[{"uri":"https://docs.example.com/readme","text":"Hello"}]}}` + "\n"
+
+	proxy := NewProxy(ProxyConfig{
+		Evaluator: evaluator,
+		Stderr:    io.Discard,
+	})
+
+	clientReader := strings.NewReader(clientInput)
+	clientWriter := &bytes.Buffer{}
+	serverBuf := &bytes.Buffer{}
+	serverWriter := newNopWriteCloser(serverBuf)
+
+	proxy.RunWithIO(clientReader, clientWriter, strings.NewReader(serverResponse), serverWriter)
+
+	// Should be forwarded to server
+	if serverBuf.Len() == 0 {
+		t.Error("expected safe resources/read to be forwarded")
+	}
+}
+
 func TestArgumentsToJSON(t *testing.T) {
 	got := ArgumentsToJSON(map[string]interface{}{"key": "val"})
 	if got != `{"key":"val"}` {
