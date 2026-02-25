@@ -11,6 +11,8 @@ AgentShield also mediates **MCP (Model Context Protocol) tool calls** — interc
 This project is one attempt at the "complete mediation" pattern [recommended by OWASP](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) for mitigating Excessive Agency (LLM06) in LLM applications.
 
 > **📝 Blog post:** [AI Agents Have Root Access to Your Machine — And Nobody's Watching](https://medium.com/@gzxuexi/ai-agents-have-root-access-to-your-machine-and-nobodys-watching-9965606176a4) — background research, real-world incidents, and OWASP alignment.
+>
+> **📝 Blog post:** [From rm -rf to $250K — Why Every AI Agent Needs a Policy Gate](https://medium.com/@gzxuexi/from-rm-rf-to-250k-why-every-ai-agent-needs-a-policy-gate-550c62459011) — the Lobstar Wilde incident: an AI agent sent 52,000,000 SOL instead of 4 because there was no numeric bound on the `amount` argument. AgentShield's value limits feature prevents this class of uncontrolled resource commitment.
 
 ## Install
 
@@ -153,7 +155,7 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 - **Tool description poisoning detection** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration, and cross-tool shadowing ([details](docs/mcp-mediation.md#tool-description-poisoning-detection))
 - **Argument content scanning** — detects SSH keys, AWS credentials, API tokens, .env contents, and large base64 blobs in MCP tool call arguments ([details](docs/mcp-mediation.md#argument-content-scanning))
 - **Config file write protection** — blocks writes to IDE hooks, MCP configs, shell dotfiles, package manager configs, and AgentShield’s own policy files ([details](docs/mcp-mediation.md#config-file-write-protection))
-- **Value limits on tool call arguments** — enforces numeric thresholds (max/min) on MCP tool call arguments to prevent uncontrolled resource commitment — e.g., an agent accidentally transferring $250K instead of $4 ([details](docs/mcp-mediation.md#value-limits))
+- **Value limits on tool call arguments** — enforces numeric thresholds (max/min) on MCP tool call arguments to prevent uncontrolled resource commitment — e.g., [the Lobstar Wilde incident](https://medium.com/@gzxuexi/from-rm-rf-to-250k-why-every-ai-agent-needs-a-policy-gate-550c62459011) where an AI agent sent 52,000,000 SOL instead of 4, causing ~$250K in losses. AgentShield would have blocked this. ([details](docs/mcp-mediation.md#value-limits))
 - **100% precision / 96.2% recall** across 123 shell threat test cases ([details](docs/accuracy.md))
 - **24/24 MCP red-team cases** pass (blocked tools, credential access, system writes, evasion)
 - **Protected paths** — `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`
