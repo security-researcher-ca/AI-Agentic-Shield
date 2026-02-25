@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -11,11 +12,12 @@ import (
 
 // MCPPolicy defines MCP-specific security policy loaded from YAML.
 type MCPPolicy struct {
-	Defaults         MCPDefaults    `yaml:"defaults"`
-	BlockedTools     []string       `yaml:"blocked_tools,omitempty"`
-	BlockedResources []string       `yaml:"blocked_resources,omitempty"`
-	Rules            []MCPRule      `yaml:"rules,omitempty"`
-	ResourceRules    []ResourceRule `yaml:"resource_rules,omitempty"`
+	Defaults         MCPDefaults      `yaml:"defaults"`
+	BlockedTools     []string         `yaml:"blocked_tools,omitempty"`
+	BlockedResources []string         `yaml:"blocked_resources,omitempty"`
+	Rules            []MCPRule        `yaml:"rules,omitempty"`
+	ResourceRules    []ResourceRule   `yaml:"resource_rules,omitempty"`
+	ValueLimits      []ValueLimitRule `yaml:"value_limits,omitempty"`
 }
 
 // MCPDefaults defines the default decision for MCP tool calls.
@@ -52,6 +54,37 @@ type MCPMatch struct {
 	ToolNameRegex    string            `yaml:"tool_name_regex,omitempty"`   // regex on tool name
 	ToolNameAny      []string          `yaml:"tool_name_any,omitempty"`     // any of these tool names
 	ArgumentPatterns map[string]string `yaml:"argument_patterns,omitempty"` // key=arg name, value=glob pattern on arg value
+}
+
+// ValueLimitRule enforces numeric thresholds on tool call arguments.
+// Designed to prevent uncontrolled resource commitment — e.g., an agent
+// accidentally transferring $250K instead of $4 (see: Lobstar Wilde incident).
+type ValueLimitRule struct {
+	ID            string          `yaml:"id"`
+	ToolPattern   string          `yaml:"tool_pattern,omitempty"`    // glob pattern on tool name
+	ToolNameRegex string          `yaml:"tool_name_regex,omitempty"` // regex on tool name
+	Argument      string          `yaml:"argument"`                  // argument name to check
+	Max           *float64        `yaml:"max,omitempty"`             // block if value > max
+	Min           *float64        `yaml:"min,omitempty"`             // block if value < min
+	Decision      policy.Decision `yaml:"decision"`                  // BLOCK or AUDIT
+	Reason        string          `yaml:"reason,omitempty"`
+}
+
+// ValueLimitFinding records a value limit violation.
+type ValueLimitFinding struct {
+	RuleID   string          `json:"rule_id"`
+	ArgName  string          `json:"arg_name"`
+	Value    float64         `json:"value"`
+	Limit    string          `json:"limit"` // e.g., "max=100"
+	Decision policy.Decision `json:"decision"`
+	Reason   string          `json:"reason"`
+}
+
+// ValueLimitResult holds the outcome of checking tool call arguments
+// against all configured value limit rules.
+type ValueLimitResult struct {
+	Blocked  bool                `json:"blocked"`
+	Findings []ValueLimitFinding `json:"findings,omitempty"`
 }
 
 // MCPEvalResult holds the outcome of evaluating an MCP tool call.
@@ -368,6 +401,95 @@ func matchResourceRule(uri string, rule ResourceRule) bool {
 		return false
 	}
 	return matched
+}
+
+// CheckValueLimits evaluates tool call arguments against configured value limit
+// rules. Returns findings for any arguments that exceed the thresholds.
+func (e *PolicyEvaluator) CheckValueLimits(toolName string, arguments map[string]interface{}) ValueLimitResult {
+	result := ValueLimitResult{}
+
+	for _, rule := range e.policy.ValueLimits {
+		if !matchValueLimitTool(toolName, rule) {
+			continue
+		}
+
+		numVal, ok := extractNumericArg(arguments, rule.Argument)
+		if !ok {
+			continue
+		}
+
+		violated := false
+		limitDesc := ""
+
+		if rule.Max != nil && numVal > *rule.Max {
+			violated = true
+			limitDesc = fmt.Sprintf("max=%.2f", *rule.Max)
+		}
+		if rule.Min != nil && numVal < *rule.Min {
+			violated = true
+			limitDesc = fmt.Sprintf("min=%.2f", *rule.Min)
+		}
+
+		if violated {
+			reason := rule.Reason
+			if reason == "" {
+				reason = fmt.Sprintf("Value limit exceeded: %s=%v (%s)", rule.Argument, numVal, limitDesc)
+			}
+			finding := ValueLimitFinding{
+				RuleID:   rule.ID,
+				ArgName:  rule.Argument,
+				Value:    numVal,
+				Limit:    limitDesc,
+				Decision: rule.Decision,
+				Reason:   reason,
+			}
+			result.Findings = append(result.Findings, finding)
+			if rule.Decision == policy.DecisionBlock {
+				result.Blocked = true
+			}
+		}
+	}
+
+	return result
+}
+
+// matchValueLimitTool checks if a tool name matches a ValueLimitRule's tool filter.
+func matchValueLimitTool(toolName string, rule ValueLimitRule) bool {
+	if rule.ToolPattern != "" {
+		if matchToolName(toolName, rule.ToolPattern) {
+			return true
+		}
+	}
+	if rule.ToolNameRegex != "" {
+		re, err := regexp.Compile(rule.ToolNameRegex)
+		if err == nil && re.MatchString(toolName) {
+			return true
+		}
+	}
+	// If no tool filter specified, rule applies to all tools
+	return rule.ToolPattern == "" && rule.ToolNameRegex == ""
+}
+
+// extractNumericArg extracts a float64 from a tool call argument by name.
+// Supports top-level arguments; returns (value, true) if found and numeric.
+func extractNumericArg(arguments map[string]interface{}, argName string) (float64, bool) {
+	val, ok := arguments[argName]
+	if !ok {
+		return 0, false
+	}
+	switch v := val.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		f, err := v.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
 
 func decisionSeverity(d policy.Decision) int {

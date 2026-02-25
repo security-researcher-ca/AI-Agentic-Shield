@@ -328,6 +328,29 @@ func (p *Proxy) evaluateToolCall(msg *Message) (bool, []byte) {
 		}
 	}
 
+	// If still not blocked, check value limits on numeric arguments
+	if result.Decision != "BLOCK" {
+		vlResult := p.cfg.Evaluator.CheckValueLimits(params.Name, params.Arguments)
+		if vlResult.Blocked {
+			result.Decision = "BLOCK"
+			result.TriggeredRules = append(result.TriggeredRules, "value-limit")
+			for _, f := range vlResult.Findings {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("value_limit: %s (arg: %s, value: %.2f, %s)", f.Reason, f.ArgName, f.Value, f.Limit))
+			}
+			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by value limit: %s (%d violations)\n",
+				params.Name, len(vlResult.Findings))
+			for _, f := range vlResult.Findings {
+				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s=%.2f (%s)\n", f.RuleID, f.ArgName, f.Value, f.Limit)
+			}
+		} else if len(vlResult.Findings) > 0 {
+			// AUDIT-level findings
+			result.TriggeredRules = append(result.TriggeredRules, "value-limit-audit")
+			for _, f := range vlResult.Findings {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("value_limit_audit: %s (arg: %s, value: %.2f, %s)", f.Reason, f.ArgName, f.Value, f.Limit))
+			}
+		}
+	}
+
 	// If still not blocked, check for config file write attempts
 	if result.Decision != "BLOCK" {
 		guardResult := CheckConfigGuard(params.Name, params.Arguments)

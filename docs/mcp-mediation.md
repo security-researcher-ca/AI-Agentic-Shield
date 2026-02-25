@@ -26,13 +26,14 @@ AgentShield can intercept and evaluate [Model Context Protocol](https://modelcon
    - A **blocked tools list** (always-blocked tool names)
    - **Fine-grained rules** with glob/regex tool name matching and argument pattern matching
 4. **Argument content scanning** — even if the tool name and argument patterns pass policy, AgentShield scans all argument *values* for secrets, credentials, and encoded data that may indicate exfiltration.
-5. **Config file guard** — blocks writes to IDE configs, AgentShield’s own policy files, shell dotfiles, and package manager configs regardless of tool name or policy rules.
-6. **Decision:**
+5. **Value limits** — numeric arguments are checked against configured thresholds (max/min) to prevent uncontrolled resource commitment (e.g., transferring $250K instead of $4).
+6. **Config file guard** — blocks writes to IDE configs, AgentShield’s own policy files, shell dotfiles, and package manager configs regardless of tool name or policy rules.
+7. **Decision:**
    - `BLOCK` → proxy returns a JSON-RPC error to the IDE; the request never reaches the server.
    - `AUDIT` → request is forwarded to the server; the decision is logged.
    - `ALLOW` → request is forwarded silently.
-7. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
-8. All other MCP messages (`initialize`, notifications) pass through transparently.
+8. **Tool description scanning** — when the server returns a `tools/list` response, AgentShield scans each tool’s description for poisoning signals. Poisoned tools are silently removed from the list before it reaches the IDE.
+9. All other MCP messages (`initialize`, notifications) pass through transparently.
 
 ### What is mediated
 
@@ -231,6 +232,82 @@ The proxy blocks any tool call that attempts to write to protected config files.
 | `kube-config` | `~/.kube/config` | Agent redirects cluster access |
 
 This guard runs independently of policy rules — it cannot be disabled by modifying `mcp-policy.yaml`.
+
+---
+
+## Value Limits
+
+The proxy enforces numeric thresholds on MCP tool call arguments to prevent **uncontrolled resource commitment** — agents accidentally executing high-value financial transfers, provisioning expensive cloud resources, or making bulk purchases due to parsing errors or social engineering.
+
+### Motivation: The Lobstar Wilde Incident
+
+In February 2026, an autonomous AI trading bot attempted to send 4 SOL (~$4) to a social media user. Due to a parsing error, it transferred its **entire token balance — 52 million tokens (~$250,000)** — in a single irreversible blockchain transaction. There were no value limits, no confirmation step, and no way to recover the funds.
+
+AgentShield's value limits would have blocked this at the MCP tool call layer.
+
+### Policy configuration
+
+Add `value_limits` to your `mcp-policy.yaml`:
+
+```yaml
+value_limits:
+  # Block any crypto transfer above 1000 tokens
+  - id: block-large-crypto-transfer
+    tool_name_regex: "send_.*|transfer_.*"
+    argument: "amount"
+    max: 1000
+    decision: "BLOCK"
+    reason: "Crypto transfer exceeds safety limit of 1000 tokens."
+
+  # Audit payments above $10
+  - id: audit-medium-payment
+    tool_pattern: "pay_*"
+    argument: "amount"
+    max: 10
+    decision: "AUDIT"
+    reason: "Payment above $10 flagged for review."
+
+  # Block negative withdrawals (overflow protection)
+  - id: block-negative-withdraw
+    tool_pattern: "withdraw"
+    argument: "amount"
+    min: 0
+    decision: "BLOCK"
+    reason: "Withdrawal amount must not be negative."
+
+  # Global quantity cap for any tool
+  - id: global-quantity-cap
+    argument: "quantity"
+    max: 1000
+    decision: "BLOCK"
+    reason: "Quantity exceeds global cap."
+```
+
+### Rule fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique rule identifier |
+| `tool_pattern` | glob | Glob pattern on tool name (e.g., `send_*`) |
+| `tool_name_regex` | regex | Regex on tool name (e.g., `send_.*\|transfer_.*`) |
+| `argument` | string | Name of the numeric argument to check |
+| `max` | float | Block/audit if value > max |
+| `min` | float | Block/audit if value < min |
+| `decision` | string | `BLOCK` or `AUDIT` |
+| `reason` | string | Human-readable reason for the limit |
+
+If neither `tool_pattern` nor `tool_name_regex` is specified, the rule applies to **all tools** with the named argument.
+
+### Evaluation order
+
+Value limits are checked **after** argument content scanning and **before** config file guard:
+
+1. Policy rules (blocked tools, name/argument pattern matching)
+2. Argument content scanning (secrets, credentials, encoded data)
+3. **Value limits** (numeric thresholds)
+4. Config file guard (protected config paths)
+
+The most restrictive decision wins. A `BLOCK` from any layer stops the tool call.
 
 ---
 
