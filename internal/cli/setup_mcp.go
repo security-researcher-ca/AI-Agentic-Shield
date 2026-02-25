@@ -191,10 +191,34 @@ func wrapMCPConfig(loc mcpConfigLocation) error {
 			continue
 		}
 
-		// Skip URL-based (HTTP transport) servers
-		if _, hasURL := serverMap["url"]; hasURL {
-			fmt.Printf("  ⏭  %s: HTTP transport (skipped, not yet supported)\n", name)
-			skipped++
+		// Wrap URL-based (Streamable HTTP transport) servers
+		if urlRaw, hasURL := serverMap["url"]; hasURL {
+			urlStr, ok := urlRaw.(string)
+			if !ok || urlStr == "" {
+				continue
+			}
+			// Already wrapped?
+			if strings.Contains(urlStr, "agentshield") || strings.Contains(urlStr, "127.0.0.1:91") {
+				fmt.Printf("  ✅ %s: HTTP already wrapped\n", name)
+				wrapped++
+				continue
+			}
+			// Assign a deterministic port per server: 9100 + index
+			port := 9100 + wrapped + skipped
+			localURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+			// Store original URL and port for unwrapping and proxy startup
+			serverMap["url"] = localURL
+			if serverMap["_agentshield"] == nil {
+				serverMap["_agentshield"] = map[string]interface{}{}
+			}
+			meta, _ := serverMap["_agentshield"].(map[string]interface{})
+			meta["original_url"] = urlStr
+			meta["proxy_port"] = port
+			serverMap["_agentshield"] = meta
+			servers[name] = serverMap
+			fmt.Printf("  ✅ %s: HTTP wrapped (%s → %s, proxy port %d)\n", name, urlStr, localURL, port)
+			fmt.Printf("     Start proxy: agentshield mcp-http-proxy --upstream %s --port %d\n", urlStr, port)
+			wrapped++
 			continue
 		}
 
@@ -307,6 +331,19 @@ func unwrapMCPConfig(loc mcpConfigLocation) error {
 			continue
 		}
 
+		// Unwrap HTTP servers: restore original URL from _agentshield metadata
+		if meta, hasMeta := serverMap["_agentshield"].(map[string]interface{}); hasMeta {
+			if origURL, ok := meta["original_url"].(string); ok && origURL != "" {
+				serverMap["url"] = origURL
+				delete(serverMap, "_agentshield")
+				servers[name] = serverMap
+				fmt.Printf("  ✅ %s: HTTP unwrapped (restored %s)\n", name, origURL)
+				unwrapped++
+				continue
+			}
+		}
+
+		// Unwrap stdio servers
 		command, _ := serverMap["command"].(string)
 		if command != "agentshield" {
 			continue

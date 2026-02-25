@@ -2,15 +2,37 @@
 
 AgentShield can intercept and evaluate [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) tool calls between AI agents and MCP servers, applying the same defense-in-depth philosophy used for shell commands.
 
+Both MCP transport mechanisms are supported:
+- **stdio** — for local MCP servers spawned as child processes
+- **Streamable HTTP** — for remote MCP servers accessed via HTTP/HTTPS
+
 ## Architecture
+
+### stdio transport (local servers)
 
 ```
 ┌──────────┐    JSON-RPC     ┌─────────────────────┐    JSON-RPC     ┌────────────┐
 │  IDE /   │ ──────────────► │  AgentShield        │ ──────────────► │  MCP       │
 │  Agent   │                 │  MCP Proxy          │                 │  Server    │
-│          │ ◄────────────── │  (stdio bridge)     │ ◄────────────── │            │
+│          │ ◄────────────── │  (stdio bridge)     │ ◄────────────── │  (local)   │
 └──────────┘   responses /   └─────────────────────┘   responses     └────────────┘
                block errors        │
+                                   ▼
+                            ┌──────────────┐
+                            │  Audit Log   │
+                            │ audit.jsonl  │
+                            └──────────────┘
+```
+
+### Streamable HTTP transport (remote servers)
+
+```
+┌──────────┐   HTTP POST    ┌─────────────────────┐   HTTP POST    ┌────────────┐
+│  IDE /   │ ─────────────► │  AgentShield        │ ─────────────► │  Remote    │
+│  Agent   │                │  HTTP Proxy         │                │  MCP       │
+│          │ ◄───────────── │  (localhost:<port>)  │ ◄───────────── │  Server    │
+└──────────┘  JSON / SSE    └─────────────────────┘  JSON / SSE    └────────────┘
+                                   │
                                    ▼
                             ┌──────────────┐
                             │  Audit Log   │
@@ -90,7 +112,94 @@ agentshield setup mcp            # wrap all detected MCP server configs
 agentshield setup mcp --disable  # restore original configs
 ```
 
-This scans known config locations (`.cursor/mcp.json`, Claude Desktop config) and wraps stdio server commands automatically.
+This scans known config locations (`.cursor/mcp.json`, Claude Desktop config) and wraps both stdio and HTTP server configs automatically.
+
+---
+
+## Streamable HTTP Transport
+
+AgentShield supports MCP servers that use the [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports) (the MCP spec's replacement for the deprecated SSE transport). This covers remote MCP servers accessed via `url` instead of `command`.
+
+### Direct HTTP proxy
+
+```bash
+agentshield mcp-http-proxy --upstream http://localhost:8080/mcp --port 9100
+```
+
+This starts a local HTTP reverse proxy on `127.0.0.1:9100` that forwards allowed requests to the upstream MCP server. All the same security layers apply: policy evaluation, content scanning, value limits, config guard, and tool description poisoning detection.
+
+### IDE configuration
+
+#### Cursor (`.cursor/mcp.json`)
+
+Before:
+```json
+{
+  "mcpServers": {
+    "remote-api": {
+      "url": "https://mcp.example.com/api"
+    }
+  }
+}
+```
+
+After:
+```json
+{
+  "mcpServers": {
+    "remote-api": {
+      "url": "http://127.0.0.1:9100"
+    }
+  }
+}
+```
+
+Then start the HTTP proxy:
+```bash
+agentshield mcp-http-proxy --upstream https://mcp.example.com/api --port 9100
+```
+
+#### Automatic setup
+
+`agentshield setup mcp` now wraps HTTP-based servers as well as stdio servers. For each `url`-based server, it:
+
+1. Assigns a deterministic local port (starting at 9100)
+2. Rewrites the `url` to `http://127.0.0.1:<port>`
+3. Stores the original URL in `_agentshield` metadata for unwrapping
+4. Prints the `agentshield mcp-http-proxy` command to start the proxy
+
+```
+$ agentshield setup mcp
+  ✅ filesystem: wrapped (npx → agentshield mcp-proxy -- npx)
+  ✅ remote-api: HTTP wrapped (https://mcp.example.com/api → http://127.0.0.1:9100, proxy port 9100)
+     Start proxy: agentshield mcp-http-proxy --upstream https://mcp.example.com/api --port 9100
+```
+
+### What is supported
+
+| Feature | stdio | Streamable HTTP |
+|---|---|---|
+| `tools/call` mediation | ✅ | ✅ |
+| `resources/read` mediation | ✅ | ✅ |
+| Tool description poisoning | ✅ | ✅ |
+| Argument content scanning | ✅ | ✅ |
+| Value limits | ✅ | ✅ |
+| Config file guard | ✅ | ✅ |
+| SSE streaming responses | N/A | ✅ |
+| `Mcp-Session-Id` passthrough | N/A | ✅ |
+| Auth header passthrough | N/A | ✅ |
+
+### CLI reference
+
+```
+agentshield mcp-http-proxy --upstream <url> [--port <port>] [--mcp-policy <path>]
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--upstream` | Upstream MCP server URL (required) | — |
+| `--port` | Local port to listen on | auto-assign |
+| `--mcp-policy` | Path to MCP policy YAML | `~/.agentshield/mcp-policy.yaml` |
 
 ## MCP Policy
 

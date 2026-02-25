@@ -149,7 +149,7 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 ## Security Highlights
 
 - **6-layer analysis** — Regex, Structural (AST), Semantic, Dataflow, Stateful, Guardian
-- **MCP tool call mediation** — intercepts `tools/call` and `resources/read` requests, blocks dangerous tool invocations and sensitive resource access
+- **MCP tool call mediation** — intercepts `tools/call` and `resources/read` requests via both **stdio** and **Streamable HTTP** transports, blocks dangerous tool invocations and sensitive resource access ([details](docs/mcp-mediation.md#streamable-http-transport))
 - **Tool description poisoning detection** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration, and cross-tool shadowing ([details](docs/mcp-mediation.md#tool-description-poisoning-detection))
 - **Argument content scanning** — detects SSH keys, AWS credentials, API tokens, .env contents, and large base64 blobs in MCP tool call arguments ([details](docs/mcp-mediation.md#argument-content-scanning))
 - **Config file write protection** — blocks writes to IDE hooks, MCP configs, shell dotfiles, package manager configs, and AgentShield’s own policy files ([details](docs/mcp-mediation.md#config-file-write-protection))

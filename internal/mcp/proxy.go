@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 )
 
 // AuditEntry records an MCP tool call decision for the audit log.
@@ -45,6 +44,7 @@ type ProxyConfig struct {
 // Proxy is a transparent MCP stdio proxy that intercepts tools/call requests.
 type Proxy struct {
 	cfg       ProxyConfig
+	handler   *MessageHandler
 	serverCmd *exec.Cmd
 	stderr    io.Writer
 }
@@ -55,7 +55,15 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	return &Proxy{cfg: cfg, stderr: stderr}
+	return &Proxy{
+		cfg:    cfg,
+		stderr: stderr,
+		handler: &MessageHandler{
+			Evaluator: cfg.Evaluator,
+			OnAudit:   cfg.OnAudit,
+			Stderr:    stderr,
+		},
+	}
 }
 
 // Run starts the proxy: spawns the child MCP server, bridges stdin/stdout,
@@ -131,7 +139,7 @@ func (p *Proxy) proxyClientToServer(clientReader io.Reader, serverWriter io.Writ
 		}
 
 		if kind == KindToolCall {
-			blocked, blockResp := p.evaluateToolCall(msg)
+			blocked, blockResp := p.handler.HandleToolCall(msg)
 			if blocked {
 				// Send JSON-RPC error back to client; don't forward to server
 				writeLineToWriter(clientWriter, blockResp)
@@ -140,7 +148,7 @@ func (p *Proxy) proxyClientToServer(clientReader io.Reader, serverWriter io.Writ
 		}
 
 		if kind == KindResourceRead {
-			blocked, blockResp := p.evaluateResourceRead(msg)
+			blocked, blockResp := p.handler.HandleResourceRead(msg)
 			if blocked {
 				writeLineToWriter(clientWriter, blockResp)
 				continue
@@ -162,7 +170,7 @@ func (p *Proxy) proxyServerToClient(serverReader io.Reader, clientWriter io.Writ
 		line := scanner.Bytes()
 
 		// Try to detect tools/list responses and scan for poisoned descriptions
-		if filtered := p.filterToolsListResponse(line); filtered != nil {
+		if filtered := p.handler.FilterToolsListResponse(line); filtered != nil {
 			writeLineToWriter(clientWriter, filtered)
 			continue
 		}
@@ -171,238 +179,9 @@ func (p *Proxy) proxyServerToClient(serverReader io.Reader, clientWriter io.Writ
 	}
 }
 
-// filterToolsListResponse checks if a message is a tools/list response.
-// If it is, scans each tool description for poisoning and removes poisoned tools.
-// Returns the modified JSON bytes, or nil if the message is not a tools/list response.
-func (p *Proxy) filterToolsListResponse(line []byte) []byte {
-	var msg Message
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil
-	}
-
-	// Only process responses (has result, no method)
-	if msg.Method != "" || msg.Result == nil {
-		return nil
-	}
-
-	// Try to parse as ListToolsResult
-	var listResult ListToolsResult
-	if err := json.Unmarshal(msg.Result, &listResult); err != nil {
-		return nil
-	}
-
-	// Must have a tools array to be a tools/list response
-	if listResult.Tools == nil {
-		return nil
-	}
-
-	// Scan each tool and filter out poisoned ones
-	var clean []ToolDefinition
-	removed := 0
-	for _, tool := range listResult.Tools {
-		scanResult := ScanToolDescription(tool)
-		if scanResult.Poisoned {
-			removed++
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] POISONED tool hidden: %s (%d signals)\n",
-				tool.Name, len(scanResult.Findings))
-			for _, f := range scanResult.Findings {
-				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s\n", f.Signal, f.Detail)
-			}
-
-			// Audit the poisoned tool
-			if p.cfg.OnAudit != nil {
-				reasons := make([]string, 0, len(scanResult.Findings))
-				for _, f := range scanResult.Findings {
-					reasons = append(reasons, string(f.Signal)+": "+f.Detail)
-				}
-				p.cfg.OnAudit(AuditEntry{
-					Timestamp:      time.Now().UTC().Format(time.RFC3339),
-					ToolName:       tool.Name,
-					Decision:       "BLOCK",
-					Flagged:        true,
-					TriggeredRules: []string{"tool-description-poisoning"},
-					Reasons:        reasons,
-					Source:         "mcp-proxy-description-scan",
-				})
-			}
-			continue
-		}
-		clean = append(clean, tool)
-	}
-
-	if removed == 0 {
-		return nil // no changes needed, use original bytes
-	}
-
-	_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] tools/list: %d/%d tools passed, %d hidden\n",
-		len(clean), len(listResult.Tools), removed)
-
-	// Rebuild the response with filtered tools
-	listResult.Tools = clean
-	newResult, err := json.Marshal(listResult)
-	if err != nil {
-		return nil
-	}
-
-	msg.Result = newResult
-	out, err := json.Marshal(msg)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-// evaluateResourceRead evaluates a resources/read message against the MCP policy.
-// Returns (true, blockResponse) if blocked, or (false, nil) if allowed.
-func (p *Proxy) evaluateResourceRead(msg *Message) (bool, []byte) {
-	params, err := ExtractResourceRead(msg)
-	if err != nil {
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] warning: failed to extract resource read: %v\n", err)
-		return false, nil // fail open
-	}
-
-	result := p.cfg.Evaluator.EvaluateResourceRead(params.URI)
-
-	// Log the audit entry
-	if p.cfg.OnAudit != nil {
-		p.cfg.OnAudit(AuditEntry{
-			Timestamp:      time.Now().UTC().Format(time.RFC3339),
-			ToolName:       "resources/read",
-			Arguments:      map[string]interface{}{"uri": params.URI},
-			Decision:       string(result.Decision),
-			Flagged:        result.Decision == "BLOCK" || result.Decision == "AUDIT",
-			TriggeredRules: result.TriggeredRules,
-			Reasons:        result.Reasons,
-			Source:         "mcp-proxy",
-		})
-	}
-
-	if result.Decision == "BLOCK" {
-		reason := "Blocked by policy"
-		if len(result.Reasons) > 0 {
-			reason = result.Reasons[0]
-		}
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED resource read: %s — %s\n", params.URI, reason)
-
-		blockResp, err := NewBlockResponse(msg.ID, reason)
-		if err != nil {
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] error creating block response: %v\n", err)
-			return false, nil
-		}
-		return true, blockResp
-	}
-
-	if result.Decision == "AUDIT" {
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] AUDIT resource read: %s\n", params.URI)
-	}
-
-	return false, nil
-}
-
-// evaluateToolCall evaluates a tools/call message against the MCP policy
-// and scans argument content for sensitive data exfiltration.
-// Returns (true, blockResponse) if blocked, or (false, nil) if allowed.
-func (p *Proxy) evaluateToolCall(msg *Message) (bool, []byte) {
-	params, err := ExtractToolCall(msg)
-	if err != nil {
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] warning: failed to extract tool call: %v\n", err)
-		return false, nil // fail open
-	}
-
-	result := p.cfg.Evaluator.EvaluateToolCall(params.Name, params.Arguments)
-
-	// If policy didn't block, scan argument content for secrets/exfiltration
-	if result.Decision != "BLOCK" {
-		contentResult := ScanToolCallContent(params.Name, params.Arguments)
-		if contentResult.Blocked {
-			result.Decision = "BLOCK"
-			result.TriggeredRules = append(result.TriggeredRules, "argument-content-scan")
-			for _, f := range contentResult.Findings {
-				result.Reasons = append(result.Reasons, string(f.Signal)+": "+f.Detail+" (arg: "+f.ArgName+")")
-			}
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by content scan: %s (%d signals)\n",
-				params.Name, len(contentResult.Findings))
-			for _, f := range contentResult.Findings {
-				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s (arg: %s)\n", f.Signal, f.Detail, f.ArgName)
-			}
-		}
-	}
-
-	// If still not blocked, check value limits on numeric arguments
-	if result.Decision != "BLOCK" {
-		vlResult := p.cfg.Evaluator.CheckValueLimits(params.Name, params.Arguments)
-		if vlResult.Blocked {
-			result.Decision = "BLOCK"
-			result.TriggeredRules = append(result.TriggeredRules, "value-limit")
-			for _, f := range vlResult.Findings {
-				result.Reasons = append(result.Reasons, fmt.Sprintf("value_limit: %s (arg: %s, value: %.2f, %s)", f.Reason, f.ArgName, f.Value, f.Limit))
-			}
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by value limit: %s (%d violations)\n",
-				params.Name, len(vlResult.Findings))
-			for _, f := range vlResult.Findings {
-				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s=%.2f (%s)\n", f.RuleID, f.ArgName, f.Value, f.Limit)
-			}
-		} else if len(vlResult.Findings) > 0 {
-			// AUDIT-level findings
-			result.TriggeredRules = append(result.TriggeredRules, "value-limit-audit")
-			for _, f := range vlResult.Findings {
-				result.Reasons = append(result.Reasons, fmt.Sprintf("value_limit_audit: %s (arg: %s, value: %.2f, %s)", f.Reason, f.ArgName, f.Value, f.Limit))
-			}
-		}
-	}
-
-	// If still not blocked, check for config file write attempts
-	if result.Decision != "BLOCK" {
-		guardResult := CheckConfigGuard(params.Name, params.Arguments)
-		if guardResult.Blocked {
-			result.Decision = "BLOCK"
-			result.TriggeredRules = append(result.TriggeredRules, "config-file-guard")
-			for _, f := range guardResult.Findings {
-				result.Reasons = append(result.Reasons, "["+f.Category+"] "+f.Reason+" (path: "+f.Path+")")
-			}
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED by config guard: %s (%d findings)\n",
-				params.Name, len(guardResult.Findings))
-			for _, f := range guardResult.Findings {
-				_, _ = fmt.Fprintf(p.stderr, "  - [%s] %s (path: %s)\n", f.Category, f.Reason, f.Path)
-			}
-		}
-	}
-
-	// Log the audit entry
-	if p.cfg.OnAudit != nil {
-		p.cfg.OnAudit(AuditEntry{
-			Timestamp:      time.Now().UTC().Format(time.RFC3339),
-			ToolName:       params.Name,
-			Arguments:      params.Arguments,
-			Decision:       string(result.Decision),
-			Flagged:        result.Decision == "BLOCK" || result.Decision == "AUDIT",
-			TriggeredRules: result.TriggeredRules,
-			Reasons:        result.Reasons,
-			Source:         "mcp-proxy",
-		})
-	}
-
-	if result.Decision == "BLOCK" {
-		reason := "Blocked by policy"
-		if len(result.Reasons) > 0 {
-			reason = result.Reasons[0]
-		}
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] BLOCKED tool call: %s — %s\n", params.Name, reason)
-
-		blockResp, err := NewBlockResponse(msg.ID, reason)
-		if err != nil {
-			_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] error creating block response: %v\n", err)
-			return false, nil
-		}
-		return true, blockResp
-	}
-
-	if result.Decision == "AUDIT" {
-		_, _ = fmt.Fprintf(p.stderr, "[AgentShield MCP] AUDIT tool call: %s\n", params.Name)
-	}
-
-	return false, nil
-}
+// NOTE: evaluateToolCall, evaluateResourceRead, and filterToolsListResponse
+// logic is now in handler.go (MessageHandler). The stdio Proxy delegates to
+// p.handler for all message evaluation.
 
 // writeLineToWriter writes a line followed by a newline to the writer.
 func writeLineToWriter(w io.Writer, data []byte) {
