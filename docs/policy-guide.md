@@ -688,6 +688,49 @@ AgentShield also mediates MCP (Model Context Protocol) tool calls. MCP policy is
 
 MCP policy is loaded from `~/.agentshield/mcp-policy.yaml`. A default is created by `agentshield setup mcp`.
 
+### MCP Packs
+
+MCP packs extend the base MCP policy, mirroring the shell pack system. They are loaded from `~/.agentshield/mcp-packs/*.yaml` and merged into the base policy at proxy startup.
+
+**Built-in MCP packs** (installed by `agentshield setup mcp`):
+
+| Pack | File | What it covers |
+|------|------|---------------|
+| **MCP Safety** | `mcp-safety.yaml` | Blocked tools (shell execution), system dir write blocking, file deletion audit |
+| **MCP Secrets** | `mcp-secrets.yaml` | Credential path blocking (.ssh, .aws, .gnupg, .kube), database URI scheme blocking, sensitive resource reads |
+| **MCP Financial** | `mcp-financial.yaml` | Value limits for transfers/payments/minting, negative value guards, withdrawal caps |
+
+**Merge rules** (same as shell packs):
+- Blocked tools and blocked resources are **unioned**
+- Rules, resource rules, and value limits are **appended**
+- Packs prefixed with underscore (`_disabled.yaml`) are skipped
+
+**Creating a custom MCP pack:**
+
+```yaml
+# ~/.agentshield/mcp-packs/my-company.yaml
+name: "My Company MCP Rules"
+version: "1.0.0"
+
+blocked_tools:
+  - "dangerous_internal_tool"
+
+rules:
+  - id: co-block-prod-db-tool
+    match:
+      tool_name_regex: "query_.*_prod"
+    decision: "BLOCK"
+    reason: "Direct production database queries are blocked."
+
+value_limits:
+  - id: co-cap-api-calls
+    tool_name_regex: "call_api.*"
+    argument: "count"
+    max: 50.0
+    decision: "BLOCK"
+    reason: "API call batch size capped at 50."
+```
+
 ```yaml
 defaults:
   decision: "AUDIT"          # ALLOW, AUDIT, or BLOCK

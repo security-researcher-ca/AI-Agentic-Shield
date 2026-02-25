@@ -1,0 +1,79 @@
+name: "MCP Safety"
+description: "Block dangerous MCP tool invocations: shell execution, system directory writes, and dangerous tool patterns"
+version: "1.0.0"
+author: "AgentShield Security Research"
+
+blocked_tools:
+  - "execute_command"
+  - "run_shell"
+  - "run_terminal_command"
+  - "shell_exec"
+  - "run_bash"
+  - "run_code"
+  - "eval_code"
+  - "exec_code"
+
+rules:
+  # === BLOCK: System directory writes ===
+  - id: mcp-safety-block-etc-write
+    match:
+      tool_name_any:
+        - "write_file"
+        - "create_file"
+        - "edit_file"
+        - "write_to_file"
+      argument_patterns:
+        path: "/etc/**"
+    decision: "BLOCK"
+    reason: "File write to /etc/ system directory is blocked."
+
+  - id: mcp-safety-block-usr-write
+    match:
+      tool_name_any:
+        - "write_file"
+        - "create_file"
+        - "edit_file"
+        - "write_to_file"
+      argument_patterns:
+        path: "/usr/**"
+    decision: "BLOCK"
+    reason: "File write to /usr/ system directory is blocked."
+
+  - id: mcp-safety-block-var-write
+    match:
+      tool_name_any:
+        - "write_file"
+        - "create_file"
+        - "edit_file"
+        - "write_to_file"
+      argument_patterns:
+        path: "/var/**"
+    decision: "BLOCK"
+    reason: "File write to /var/ system directory is blocked."
+
+  # === BLOCK: Root directory operations ===
+  - id: mcp-safety-block-root-write
+    match:
+      tool_name_any:
+        - "write_file"
+        - "create_file"
+        - "edit_file"
+        - "write_to_file"
+      argument_patterns:
+        path: "/"
+    decision: "BLOCK"
+    reason: "File write to filesystem root is blocked."
+
+  # === AUDIT: File deletion tools ===
+  - id: mcp-safety-audit-delete
+    match:
+      tool_name_regex: "(delete_file|remove_file|unlink)"
+    decision: "AUDIT"
+    reason: "File deletion operations flagged for review."
+
+  # === AUDIT: Process/system tools ===
+  - id: mcp-safety-audit-process
+    match:
+      tool_name_regex: "(kill_process|restart_service|stop_service|reboot)"
+    decision: "AUDIT"
+    reason: "Process/system management operations flagged for review."

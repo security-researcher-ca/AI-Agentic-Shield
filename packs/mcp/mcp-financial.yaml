@@ -1,0 +1,82 @@
+name: "MCP Financial Safety"
+description: "Enforce value limits on financial tool calls to prevent uncontrolled resource commitment (Lobstar Wilde scenario)"
+version: "1.0.0"
+author: "AgentShield Security Research"
+
+# Value limits enforce numeric thresholds on tool call arguments.
+# These rules prevent an agent from accidentally transferring large sums,
+# minting excessive tokens, or committing unbounded resources.
+#
+# Real-world precedent: the Lobstar Wilde incident where an AI agent
+# sent 52,000,000 SOL (~$250K) instead of 4 SOL.
+# See: https://medium.com/@gzxuexi/from-rm-rf-to-250k-why-every-ai-agent-needs-a-policy-gate-550c62459011
+
+value_limits:
+  # === Token/crypto transfers ===
+  - id: mcp-fin-cap-transfer-amount
+    tool_name_regex: "send_.*|transfer_.*"
+    argument: "amount"
+    max: 100.0
+    decision: "BLOCK"
+    reason: "Token/crypto transfer exceeds safety limit of 100 units."
+
+  - id: mcp-fin-cap-transfer-quantity
+    tool_name_regex: "send_.*|transfer_.*"
+    argument: "quantity"
+    max: 100.0
+    decision: "BLOCK"
+    reason: "Token/crypto transfer quantity exceeds safety limit."
+
+  # === Payment processing ===
+  - id: mcp-fin-cap-payment-amount
+    tool_name_regex: ".*pay.*|.*charge.*|.*invoice.*"
+    argument: "amount"
+    max: 1000.0
+    decision: "BLOCK"
+    reason: "Payment amount exceeds safety limit of $1,000."
+
+  - id: mcp-fin-cap-payment-total
+    tool_name_regex: ".*pay.*|.*charge.*|.*invoice.*"
+    argument: "total"
+    max: 1000.0
+    decision: "BLOCK"
+    reason: "Payment total exceeds safety limit of $1,000."
+
+  # === Minting / creation ===
+  - id: mcp-fin-cap-mint-amount
+    tool_name_regex: "mint_.*|create_token.*"
+    argument: "amount"
+    max: 1000.0
+    decision: "BLOCK"
+    reason: "Minting amount exceeds safety limit."
+
+  # === Negative value guard (prevent sign-flip attacks) ===
+  - id: mcp-fin-block-negative-transfer
+    tool_name_regex: "send_.*|transfer_.*|.*pay.*"
+    argument: "amount"
+    min: 0.0
+    decision: "BLOCK"
+    reason: "Negative transfer amounts are not allowed."
+
+  # === Withdrawal limits ===
+  - id: mcp-fin-cap-withdrawal
+    tool_name_regex: "withdraw.*"
+    argument: "amount"
+    max: 500.0
+    decision: "BLOCK"
+    reason: "Withdrawal exceeds safety limit of 500 units."
+
+  - id: mcp-fin-block-negative-withdrawal
+    tool_name_regex: "withdraw.*"
+    argument: "amount"
+    min: 0.0
+    decision: "BLOCK"
+    reason: "Negative withdrawal amounts are not allowed."
+
+rules:
+  # === AUDIT: Any financial tool call ===
+  - id: mcp-fin-audit-financial-tools
+    match:
+      tool_name_regex: "(send_|transfer_|withdraw|mint_|.*pay.*|.*charge.*|.*invoice.*)"
+    decision: "AUDIT"
+    reason: "Financial tool call flagged for review."

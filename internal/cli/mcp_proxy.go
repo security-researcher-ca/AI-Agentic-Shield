@@ -61,6 +61,24 @@ func mcpProxyCommand(cmd *cobra.Command, args []string) error {
 		mcpPolicy = mcp.DefaultMCPPolicy()
 	}
 
+	// Load and merge MCP packs
+	if cfg != nil {
+		packsDir := filepath.Join(cfg.ConfigDir, mcp.DefaultMCPPacksDir)
+		merged, packInfos, packErr := mcp.LoadMCPPacks(packsDir, mcpPolicy)
+		if packErr != nil {
+			fmt.Fprintf(os.Stderr, "[AgentShield MCP] warning: MCP packs load failed: %v\n", packErr)
+		} else {
+			mcpPolicy = merged
+			for _, pi := range packInfos {
+				status := "enabled"
+				if !pi.Enabled {
+					status = "disabled"
+				}
+				fmt.Fprintf(os.Stderr, "[AgentShield MCP] pack: %s (%s, %d rules)\n", pi.Name, status, pi.RuleCount)
+			}
+		}
+	}
+
 	evaluator := mcp.NewPolicyEvaluator(mcpPolicy)
 
 	// Set up audit logging

@@ -162,6 +162,7 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 - **Prompt injection detection** — instruction overrides, obfuscation, base64 payloads
 - **Unicode smuggling detection** — homoglyphs, zero-width chars, bidi overrides
 - **Automatic secret redaction** in audit logs
+- **MCP policy packs** — 3 built-in packs (Safety, Secrets, Financial) installed by `agentshield setup mcp`, composable with custom packs ([details](docs/policy-guide.md#mcp-packs))
 - **Fail-safe defaults** — unknown commands → AUDIT, not ALLOW
 
 ## Known Limitations
