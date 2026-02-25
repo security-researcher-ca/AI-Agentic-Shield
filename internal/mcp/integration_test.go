@@ -86,8 +86,8 @@ func TestIntegration_EchoServer_Direct(t *testing.T) {
 	if err := json.Unmarshal(msg.Result, &listResult); err != nil {
 		t.Fatalf("failed to parse tools list: %v", err)
 	}
-	if len(listResult.Tools) != 5 {
-		t.Errorf("expected 5 tools, got %d", len(listResult.Tools))
+	if len(listResult.Tools) != 6 {
+		t.Errorf("expected 6 tools, got %d", len(listResult.Tools))
 	}
 
 	// Test tools/call
