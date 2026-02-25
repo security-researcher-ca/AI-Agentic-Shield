@@ -142,9 +142,10 @@ func TestRedTeamPipelineReport(t *testing.T) {
 	sb.WriteString("- **Got**: The actual decision from the 6-layer pipeline\n")
 	sb.WriteString("- Pipeline layers: regex → structural → semantic → dataflow → stateful → guardian\n")
 
-	reportPath := "../../REDTEAM_REPORT.md"
+	reportPath := "testdata/PIPELINE_REDTEAM_REPORT.md"
 	if err := os.WriteFile(reportPath, []byte(sb.String()), 0644); err != nil {
-		t.Fatalf("failed to write report: %v", err)
+		t.Logf("warning: could not write report: %v", err)
+	} else {
+		t.Logf("Generated %s with %d command checks", reportPath, total)
 	}
-	t.Logf("Generated %s with %d command checks", reportPath, total)
 }

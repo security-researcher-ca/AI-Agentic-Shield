@@ -175,9 +175,10 @@ func TestRedTeamReport(t *testing.T) {
 
 	_, filename, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(filename)
-	reportPath := filepath.Join(dir, "..", "..", "REDTEAM_REPORT.md")
+	reportPath := filepath.Join(dir, "testdata", "GUARDIAN_REDTEAM_REPORT.md")
 	if err := os.WriteFile(reportPath, []byte(sb.String()), 0644); err != nil {
-		t.Fatalf("failed to write report: %v", err)
+		t.Logf("warning: could not write report: %v", err)
+	} else {
+		t.Logf("Generated %s with %d command checks", reportPath, totalCmds)
 	}
-	t.Logf("Generated %s with %d command checks", reportPath, totalCmds)
 }

@@ -1,1 +1,6 @@
 local
+
+# Auto-generated test sub-reports (the root REDTEAM_REPORT.md is hand-maintained)
+internal/guardian/testdata/GUARDIAN_REDTEAM_REPORT.md
+internal/analyzer/testdata/PIPELINE_REDTEAM_REPORT.md
+internal/mcp/testdata/MCP_REDTEAM_REPORT.md
