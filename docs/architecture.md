@@ -33,12 +33,14 @@ flowchart TB
         Unicode --> Norm --> Pipeline --> Policy --> Redact
     end
 
-    subgraph MCPP["MCP Proxy"]
+    subgraph MCPP["MCP Proxy\n(stdio + Streamable HTTP)"]
         direction TB
         DescScan["Tool Description\nPoisoning Scanner"]
         MCPPolicy["MCP Policy Engine\n(blocked tools + rules)"]
         ContentScan["Argument Content\nScanner\n(secrets, credentials,\nbase64 exfiltration)"]
-        DescScan --> MCPPolicy --> ContentScan
+        ValueLim["Value Limits\n(numeric thresholds)"]
+        ConfigGuard["Config File\nGuard"]
+        DescScan --> MCPPolicy --> ContentScan --> ValueLim --> ConfigGuard
     end
 
     AS --- AgentShield
@@ -155,7 +157,7 @@ flowchart TD
 | `internal/taxonomy` | Security taxonomy loader and compliance mapping |
 | `internal/unicode` | Unicode smuggling detection |
 | `internal/redact` | Secret redaction for audit logs |
-| `internal/cli` | CLI commands (`run`, `hook`, `setup`, `mcp-proxy`, `setup mcp`) |
+| `internal/cli` | CLI commands (`run`, `hook`, `setup`, `mcp-proxy`, `mcp-http-proxy`, `setup mcp`) |
 
 ## Agent Action Security Taxonomy
 

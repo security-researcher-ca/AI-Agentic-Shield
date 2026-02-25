@@ -192,11 +192,27 @@ AgentShield currently mediates **shell commands**. The threat surface for AI age
 
 Contributions and ideas are welcome — [open an issue](https://github.com/gzhole/LLM-Agentic-Shield/issues) or submit a PR.
 
+## Integrate Any Agent
+
+AgentShield works with any AI coding agent — not just the ones listed above. If you’re using a new IDE or building your own agent, the integration pattern is simple:
+
+- **Shell commands:** route through `agentshield run -- <cmd>`
+- **MCP servers:** wrap with `agentshield mcp-proxy` (stdio) or `agentshield mcp-http-proxy` (HTTP)
+
+We provide a structured **[Agent Integration Guide](docs/agent-integration.md)** designed for both humans and code agents to follow. If your coding agent can read files and run shell commands, it can self-integrate with AgentShield by following the guide.
+
+```bash
+# Universal: any agent can verify integration with these two commands
+agentshield run -- echo "test"      # should pass (ALLOW/AUDIT)
+agentshield run -- rm -rf /          # should BLOCK
+```
+
 ## Documentation
 
 - [Policy Authoring Guide](docs/policy-guide.md) — Rule syntax, analyzer layers, custom packs, recipes
 - [Architecture & Pipeline Details](docs/architecture.md)
 - [MCP Mediation](docs/mcp-mediation.md) — MCP proxy, policy format, IDE setup
+- [Agent Integration Guide](docs/agent-integration.md) — Structured spec for integrating AgentShield into any agent environment
 - [Accuracy Baseline & Red-Team Results](docs/accuracy.md)
 - [OWASP LLM Top 10 Compliance Mapping](compliance/indexes/owasp-llm-2025.md)
 

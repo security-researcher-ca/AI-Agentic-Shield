@@ -47,12 +47,19 @@ rules:
 
 ### Match Types
 
-| Type | Description | Best for |
-|------|-------------|----------|
-| `command_exact` | Exact string match | Specific commands: `"rm -rf /"` |
-| `command_prefix` | Starts-with match (list) | Command families: `["npm install", "pip install"]` |
-| `command_regex` | Regular expression | Complex patterns with flags/args |
-| **`structural`** | **Shell AST match** | **Flag-agnostic, sudo-transparent, pipe-aware rules** |
+| Type | Layer | Description | Best for |
+|------|-------|-------------|----------|
+| `command_exact` | Regex | Exact string match | Specific commands: `"rm -rf /"` |
+| `command_prefix` | Regex | Starts-with match (list) | Command families: `["npm install", "pip install"]` |
+| `command_regex` | Regex | Regular expression | Complex patterns with flags/args |
+| **`structural`** | Structural | **Shell AST match** | **Flag-agnostic, sudo-transparent, pipe-aware rules** |
+| **`semantic`** | Semantic | **Intent classification** | **Match by what a command *does*, not what it looks like** |
+| **`dataflow`** | Dataflow | **Source→sink taint tracking** | **Credential exfiltration, disk wipe via redirect** |
+| **`stateful`** | Stateful | **Multi-step chain detection** | **Download→execute, recon→archive→exfiltrate** |
+
+The **Guardian** layer (prompt injection, obfuscation, secrets) runs automatically on all commands — no match rules needed.
+
+Each match type is detailed below with full schema and examples.
 
 ### Regex Match Examples
 
@@ -691,7 +698,12 @@ blocked_tools:
   - "run_shell"
   - "run_terminal_command"
 
-# Fine-grained rules
+# Resources always blocked (URI glob patterns)
+blocked_resources:
+  - "file:///home/*/.ssh/**"
+  - "file:///root/.ssh/**"
+
+# Fine-grained tool call rules
 rules:
   - id: block-ssh-access
     match:
@@ -702,6 +714,23 @@ rules:
         path: "**/.ssh/**"
     decision: "BLOCK"
     reason: "Access to SSH key directories is blocked."
+
+# Resource read rules (URI pattern/regex/scheme matching)
+resource_rules:
+  - id: block-database-uris
+    match:
+      scheme: "mysql"        # exact scheme match
+    decision: "BLOCK"
+    reason: "Direct database access blocked."
+
+# Numeric value limits on tool call arguments
+value_limits:
+  - id: cap-transfer-amount
+    tool_name_regex: "send_.*|transfer_.*"
+    argument: "amount"
+    max: 100.0
+    decision: "BLOCK"
+    reason: "Transfer exceeds safety limit."
 ```
 
 ### MCP Match Types
@@ -715,10 +744,13 @@ rules:
 
 ### MCP Decision Precedence
 
-1. **Blocked tools list** — checked first, always wins
-2. **Rules** — evaluated in order, most restrictive decision wins
-3. **Argument content scan** — automatic, no config needed (detects secrets, credentials, base64 blobs)
-4. **Default** — applied if nothing else matches
+1. **Blocked tools / blocked resources** — checked first, always wins
+2. **Rules / resource rules** — evaluated in order, most restrictive decision wins
+3. **Argument content scan** — automatic (detects SSH keys, AWS creds, API tokens, base64 blobs)
+4. **Value limits** — numeric threshold enforcement on tool arguments
+5. **Config file guard** — automatic (blocks writes to IDE configs, shell dotfiles, policy files)
+6. **Tool description poisoning scanner** — automatic (scans `tools/list`, strips poisoned tools)
+7. **Default** — applied if nothing else matches
 
 ### MCP Policy Examples
 
@@ -750,9 +782,20 @@ rules:
 
 ### Built-in Protections (No Config Needed)
 
-Even without any MCP policy file, AgentShield provides two layers of automatic protection:
+Even without any MCP policy file, AgentShield provides four layers of automatic protection:
 
 - **Tool Description Poisoning Scanner** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration intent, cross-tool shadowing, and stealth instructions. Poisoned tools are silently removed before reaching the IDE.
 - **Argument Content Scanner** — scans all `tools/call` argument values for SSH keys, AWS credentials, API tokens, .env file contents, large base64 blobs, and high-entropy strings. Blocks exfiltration even through legitimate tools.
+- **Config File Guard** — blocks writes to IDE hooks (`.cursor/hooks.json`), MCP configs (`.cursor/mcp.json`), shell dotfiles (`~/.bashrc`, `~/.zshrc`), package manager configs (`~/.npmrc`, `~/.pypirc`), and AgentShield's own policy files.
+- **Value Limits** — when configured, enforces numeric max/min thresholds on tool call arguments. Prevents uncontrolled resource commitment (e.g., an agent transferring $250K instead of $4).
 
-See the [MCP Mediation docs](mcp-mediation.md) for full details.
+### Transport Support
+
+AgentShield mediates MCP via both transport mechanisms:
+
+| Transport | Command | Use case |
+|-----------|---------|----------|
+| **stdio** | `agentshield mcp-proxy -- <server-cmd>` | Local MCP servers spawned as child processes |
+| **Streamable HTTP** | `agentshield mcp-http-proxy --upstream <url>` | Remote MCP servers accessed via URL |
+
+Both transports share the same policy evaluation pipeline. See the [MCP Mediation docs](mcp-mediation.md) for full details.
