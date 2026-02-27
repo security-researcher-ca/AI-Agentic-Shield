@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,9 +33,12 @@ func runProxyScenario(t *testing.T, pol *MCPPolicy, clientMessages []string) (re
 	defer func() { _ = serverCmd.Process.Kill(); _ = serverCmd.Wait() }()
 
 	evaluator := NewPolicyEvaluator(pol)
+	var auditMu sync.Mutex
 	proxy := NewProxy(ProxyConfig{
 		Evaluator: evaluator,
 		OnAudit: func(e AuditEntry) {
+			auditMu.Lock()
+			defer auditMu.Unlock()
 			audit = append(audit, e)
 		},
 		Stderr: io.Discard,
