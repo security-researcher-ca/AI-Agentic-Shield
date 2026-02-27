@@ -148,14 +148,13 @@ func TestRedTeamMCPReport(t *testing.T) {
 			reasons = reasons[:57] + "..."
 		}
 
-		sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+		fmt.Fprintf(&sb, "| %s | %s | %s | %s | %s | %s |\n",
 			tc.ID, tc.ToolName, tc.ExpectedDecision,
-			result.Decision, icon, reasons))
+			result.Decision, icon, reasons)
 	}
 
-	sb.WriteString(fmt.Sprintf("\n**Results: %d/%d passed (%.1f%%)**\n",
-		passed, total, float64(passed)/float64(total)*100))
-
+	fmt.Fprintf(&sb, "\n**Results: %d/%d passed (%.1f%%)**\n",
+		passed, total, float64(passed)/float64(total)*100)
 	t.Log(sb.String())
 
 	// Write report file

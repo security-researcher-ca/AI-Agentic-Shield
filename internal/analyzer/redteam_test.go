@@ -129,14 +129,13 @@ func TestRedTeamPipelineReport(t *testing.T) {
 			if rules == "" {
 				rules = "(default)"
 			}
-			sb.WriteString(fmt.Sprintf("| `%s` | `%s` | %s | %s | %s | %s |\n",
-				tc.ID, shortCmd, cmd.PipelineMin, result.Decision, rules, status))
+			fmt.Fprintf(&sb, "| `%s` | `%s` | %s | %s | %s | %s |\n",
+				tc.ID, shortCmd, cmd.PipelineMin, result.Decision, rules, status)
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n**Full pipeline: %d/%d commands meet minimum decision (%0.1f%%)**\n\n",
-		pass, total, float64(pass)/float64(total)*100))
-
+	fmt.Fprintf(&sb, "\n**Full pipeline: %d/%d commands meet minimum decision (%0.1f%%)**\n\n",
+		pass, total, float64(pass)/float64(total)*100)
 	sb.WriteString("## Legend\n\n")
 	sb.WriteString("- **Pipeline Min**: The minimum acceptable decision for this command\n")
 	sb.WriteString("- **Got**: The actual decision from the 6-layer pipeline\n")
