@@ -654,10 +654,10 @@ func TestGenerateFailingTestsReport(t *testing.T) {
 			if analyzer == "" {
 				analyzer = "—"
 			}
-			b.WriteString(fmt.Sprintf("| **%s** | `%s` | %s | `%s` | %s | %s | %s | %s |\n",
+			fmt.Fprintf(&b, "| **%s** | `%s` | %s | `%s` | %s | %s | %s | %s |\n",
 				f.priority, f.tc.ID, f.tc.Classification,
 				cmd, f.tc.ExpectedDecision, f.got,
-				analyzer, desc))
+				analyzer, desc)
 		}
 		b.WriteString("\n")
 	}
@@ -666,19 +666,19 @@ func TestGenerateFailingTestsReport(t *testing.T) {
 	b.WriteString("## Full Details\n\n")
 	b.WriteString("Expand each case for the full description and triggered rules.\n\n")
 	for _, f := range failures {
-		b.WriteString(fmt.Sprintf("<details>\n<summary><b>[%s] %s</b> — %s</summary>\n\n",
-			f.priority, f.tc.ID, f.tc.Classification))
-		b.WriteString(fmt.Sprintf("- **Command**: `%s`\n", f.tc.Command))
-		b.WriteString(fmt.Sprintf("- **Expected**: %s\n", f.tc.ExpectedDecision))
-		b.WriteString(fmt.Sprintf("- **Got**: %s\n", f.got))
-		b.WriteString(fmt.Sprintf("- **Taxonomy**: %s\n", f.tc.TaxonomyRef))
-		b.WriteString(fmt.Sprintf("- **Analyzer needed**: %s\n", f.tc.Analyzer))
+		fmt.Fprintf(&b, "<details>\n<summary><b>[%s] %s</b> — %s</summary>\n\n",
+			f.priority, f.tc.ID, f.tc.Classification)
+		fmt.Fprintf(&b, "- **Command**: `%s`\n", f.tc.Command)
+		fmt.Fprintf(&b, "- **Expected**: %s\n", f.tc.ExpectedDecision)
+		fmt.Fprintf(&b, "- **Got**: %s\n", f.got)
+		fmt.Fprintf(&b, "- **Taxonomy**: %s\n", f.tc.TaxonomyRef)
+		fmt.Fprintf(&b, "- **Analyzer needed**: %s\n", f.tc.Analyzer)
 		if len(f.rules) > 0 {
-			b.WriteString(fmt.Sprintf("- **Triggered rules**: %s\n", strings.Join(f.rules, ", ")))
+			fmt.Fprintf(&b, "- **Triggered rules**: %s\n", strings.Join(f.rules, ", "))
 		}
-		b.WriteString(fmt.Sprintf("- **Tags**: %s\n", strings.Join(f.tc.Tags, ", ")))
-		b.WriteString(fmt.Sprintf("- **Description**: %s\n",
-			strings.TrimSpace(f.tc.Description)))
+		fmt.Fprintf(&b, "- **Tags**: %s\n", strings.Join(f.tc.Tags, ", "))
+		fmt.Fprintf(&b, "- **Description**: %s\n",
+			strings.TrimSpace(f.tc.Description))
 		b.WriteString("\n</details>\n\n")
 	}
 
