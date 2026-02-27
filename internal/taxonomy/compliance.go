@@ -142,7 +142,7 @@ func GenerateIndexMarkdown(idx ComplianceIndex, entries map[string]TaxonomyEntry
 				fmt.Fprintf(&sb, "- **%s** — %s (Risk: %s)\n",
 					entry.Name, strings.TrimSpace(entry.Abstract), entry.RiskLevel)
 			} else {
-				sb.WriteString(fmt.Sprintf("- `%s` _(entry not found)_\n", wID))
+				fmt.Fprintf(&sb, "- `%s` _(entry not found)_\n", wID)
 			}
 		}
 		sb.WriteString("\n")
