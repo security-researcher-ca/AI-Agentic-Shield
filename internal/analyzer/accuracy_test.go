@@ -628,7 +628,7 @@ func TestGenerateFailingTestsReport(t *testing.T) {
 		if note == "" {
 			note = "—"
 		}
-		b.WriteString(fmt.Sprintf("| %s | %d | %s |\n", a, byAnalyzer[a], note))
+		fmt.Fprintf(&b, "| %s | %d | %s |\n", a, byAnalyzer[a], note)
 	}
 	b.WriteString("\n")
 
@@ -636,7 +636,7 @@ func TestGenerateFailingTestsReport(t *testing.T) {
 	b.WriteString("## Failing Cases by Kingdom\n\n")
 	for _, kingdom := range kingdomOrder {
 		kFailures := byKingdom[kingdom]
-		b.WriteString(fmt.Sprintf("### %s (%d cases)\n\n", kingdom, len(kFailures)))
+		fmt.Fprintf(&b, "### %s (%d cases)\n\n", kingdom, len(kFailures))
 		b.WriteString("| Priority | ID | Type | Command | Expected | Got | Analyzer | Description |\n")
 		b.WriteString("|----------|----|------|---------|----------|-----|----------|-------------|\n")
 		for _, f := range kFailures {
