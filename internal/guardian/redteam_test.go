@@ -162,13 +162,13 @@ func TestRedTeamReport(t *testing.T) {
 				got = resp.SuggestedDecision
 			}
 
-			sb.WriteString(fmt.Sprintf("| `%s` | `%s` | %s | %s | %s | %s |\n",
-				tc.ID, shortCmd, cmd.GuardianMin, got, sigs, status))
+			fmt.Fprintf(&sb, "| `%s` | `%s` | %s | %s | %s | %s |\n",
+				tc.ID, shortCmd, cmd.GuardianMin, got, sigs, status)
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n**Guardian-only: %d/%d commands meet minimum decision (%0.1f%%)**\n",
-		passedCmds, totalCmds, float64(passedCmds)/float64(totalCmds)*100))
+	fmt.Fprintf(&sb, "\n**Guardian-only: %d/%d commands meet minimum decision (%0.1f%%)**\n",
+		passedCmds, totalCmds, float64(passedCmds)/float64(totalCmds)*100)
 	sb.WriteString("\n> Note: This tests the guardian layer in isolation. The full pipeline\n")
 	sb.WriteString("> (regex + structural + semantic + dataflow + stateful + guardian)\n")
 	sb.WriteString("> provides additional detection coverage for cases where guardian_min = ALLOW.\n")

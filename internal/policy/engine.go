@@ -201,16 +201,16 @@ func matchGlob(path, pattern string) bool {
 func buildExplanation(result EvalResult) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("Decision: %s\n", result.Decision))
+	fmt.Fprintf(&sb, "Decision: %s\n", result.Decision)
 
 	if len(result.TriggeredRules) > 0 {
-		sb.WriteString(fmt.Sprintf("Triggered rules: %s\n", strings.Join(result.TriggeredRules, ", ")))
+		fmt.Fprintf(&sb, "Triggered rules: %s\n", strings.Join(result.TriggeredRules, ", "))
 	}
 
 	if len(result.Reasons) > 0 {
 		sb.WriteString("Reasons:\n")
 		for _, reason := range result.Reasons {
-			sb.WriteString(fmt.Sprintf("  - %s\n", reason))
+			fmt.Fprintf(&sb, "  - %s\n", reason)
 		}
 	}
 
