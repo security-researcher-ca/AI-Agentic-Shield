@@ -50,7 +50,14 @@ jobs:
         run: |
           gosec -no-fail -fmt sarif -out gosec.sarif ./...
 
+      # NOTE: gosec sometimes emits invalid SARIF (relationships entries that are not objects),
+      # which causes github/codeql-action/upload-sarif to fail the job. We sanitize the output
+      # by removing rule.relationships, which is optional in SARIF.
+      - name: Sanitize SARIF (workaround for gosec SARIF schema issues)
+        run: |
+          jq '(.runs[].tool.driver.rules[]? |= del(.relationships))' gosec.sarif > gosec.cleaned.sarif
+
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: gosec.sarif
+          sarif_file: gosec.cleaned.sarif
