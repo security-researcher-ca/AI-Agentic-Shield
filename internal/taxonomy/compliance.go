@@ -124,9 +124,9 @@ func GenerateIndexMarkdown(idx ComplianceIndex, entries map[string]TaxonomyEntry
 	})
 
 	for _, item := range sortedItems {
-		sb.WriteString(fmt.Sprintf("## %s: %s\n\n", item.ID, item.Name))
+		fmt.Fprintf(&sb, "## %s: %s\n\n", item.ID, item.Name)
 		if item.URL != "" {
-			sb.WriteString(fmt.Sprintf("[View on OWASP](%s)\n\n", item.URL))
+			fmt.Fprintf(&sb, "[View on OWASP](%s)\n\n", item.URL)
 		}
 
 		weaknesses, ok := idx.Mappings[item.ID]
@@ -139,8 +139,8 @@ func GenerateIndexMarkdown(idx ComplianceIndex, entries map[string]TaxonomyEntry
 		for _, wID := range weaknesses {
 			entry, found := entries[wID]
 			if found {
-				sb.WriteString(fmt.Sprintf("- **%s** — %s (Risk: %s)\n",
-					entry.Name, strings.TrimSpace(entry.Abstract), entry.RiskLevel))
+				fmt.Fprintf(&sb, "- **%s** — %s (Risk: %s)\n",
+					entry.Name, strings.TrimSpace(entry.Abstract), entry.RiskLevel)
 			} else {
 				sb.WriteString(fmt.Sprintf("- `%s` _(entry not found)_\n", wID))
 			}
