@@ -112,9 +112,9 @@ func BuildComplianceIndex(std ComplianceStandard, entries []TaxonomyEntry) Compl
 func GenerateIndexMarkdown(idx ComplianceIndex, entries map[string]TaxonomyEntry) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# %s\n\n", idx.Standard.Name))
+	fmt.Fprintf(&sb, "# %s\n\n", idx.Standard.Name)
 	sb.WriteString("> Auto-generated from taxonomy weakness entries. Do not edit manually.\n")
-	sb.WriteString(fmt.Sprintf("> Source: [%s](%s)\n\n", idx.Standard.Name, idx.Standard.URL))
+	fmt.Fprintf(&sb, "> Source: [%s](%s)\n\n", idx.Standard.Name, idx.Standard.URL)
 
 	// Sort items by ID for stable output
 	sortedItems := make([]StandardItem, len(idx.Standard.Items))

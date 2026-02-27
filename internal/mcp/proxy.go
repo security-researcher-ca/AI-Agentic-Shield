@@ -183,10 +183,23 @@ func (p *Proxy) proxyServerToClient(serverReader io.Reader, clientWriter io.Writ
 // logic is now in handler.go (MessageHandler). The stdio Proxy delegates to
 // p.handler for all message evaluation.
 
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (lw *lockedWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
+}
+
 // writeLineToWriter writes a line followed by a newline to the writer.
 func writeLineToWriter(w io.Writer, data []byte) {
-	_, _ = w.Write(data)
-	_, _ = w.Write([]byte("\n"))
+	buf := make([]byte, 0, len(data)+1)
+	buf = append(buf, data...)
+	buf = append(buf, '\n')
+	_, _ = w.Write(buf)
 }
 
 // RunWithIO is like Run but accepts explicit reader/writer for testability.
@@ -195,6 +208,8 @@ func writeLineToWriter(w io.Writer, data []byte) {
 // that the client is done (by closing its stdin).
 func (p *Proxy) RunWithIO(clientReader io.Reader, clientWriter io.Writer, serverReader io.Reader, serverWriter io.WriteCloser) {
 	var wg sync.WaitGroup
+	// clientWriter is shared by both proxy directions; wrap it to avoid data races
+	clientWriter = &lockedWriter{w: clientWriter}
 
 	wg.Add(1)
 	go func() {
