@@ -203,9 +203,9 @@
 | Metric | Regex Only | Phase 2 | Phase 3+4 | Phase 5 (final) | Δ (total) |
 |--------|-----------|---------|-----------|-----------------|-----------|
 | Precision | 79.3% | 95.9% | 96.1% | **100.0%** | +20.7pp |
-| Recall | 59.0% | 88.7% | 92.5% | **96.2%** | +37.2pp |
+| Recall | 59.0% | 88.7% | 92.5% | **100.0%** | +41.0pp |
 | FP | 12 | 4 | 4 | **0** | −12 |
-| FN | 32 | 12 | 8 | **4** | −28 |
+| FN | 32 | 12 | 8 | **0** | −32 |
 
 ---
 
@@ -232,11 +232,11 @@
 - [x] Removed `internal/approval/` package (decision simplified to ALLOW/AUDIT/BLOCK per conversation)
 - [x] Removed `internal/sandbox/` package (same rationale)
 
-### Remaining (4 FN — known gaps)
-- [ ] Python reverse shell (`socket.socket()` + `subprocess.call`) — FN-REVSH-001
-- [ ] Ruby reverse shell (`TCPSocket.open`) — FN-REVSH-002
-- [ ] While-loop fork bomb (`while true; do bash & done`) — FN-FORKBMB-003
-- [ ] SSH directory archival (`tar czf ... ~/.ssh/`) — FN-SSHKEY-001
+### Remaining
+- [x] Python reverse shell (`socket.socket()` + `subprocess.call`) — FN-REVSH-001 ✅
+- [x] Ruby reverse shell (`TCPSocket.open`) — FN-REVSH-002 ✅
+- [x] SSH directory archival (`tar czf ... ~/.ssh/`) — FN-SSHKEY-001 ✅
+- [x] While-loop fork bomb (`while true; do bash & done`) — FN-FORKBMB-003 ✅
 
 ---
 
@@ -278,7 +278,7 @@
 
 ## Definition of Done (MVP)
 - [x] Policy-only enforcement works reliably ✅
-- [x] 6-layer analyzer pipeline: 100% precision, 96.2% recall ✅
+- [x] 6-layer analyzer pipeline: 100% precision, 100% recall ✅
 - [x] Audit log is useful and privacy-aware ✅
 - [x] Guardian detects prompt injection signals ✅
 - [x] Red-team pack runs (21/21 commands pass) ✅
@@ -313,6 +313,13 @@
 - [x] `agentshield status` — shows IDE hooks, MCP proxy status, policy files, packs, audit log
 - [x] `agentshield scan` — 14-test self-diagnostic (shell policy + MCP policy + description scanner + content scanner)
 - [x] `agentshield log` — displays MCP events with `[MCP]` prefix and tool_name
+
+### M6.4 HTTP Streamable MCP Proxy
+- [x] HTTP reverse proxy for MCP Streamable transport (`internal/mcp/http_proxy.go`)
+- [x] SSE (Server-Sent Events) streaming response forwarding
+- [x] `tools/list` poisoning detection on HTTP transport
+- [x] Argument content scanning on HTTP tool calls
+- [x] `agentshield mcp-http-proxy` CLI command (`internal/cli/mcp_http_proxy.go`)
 
 ---
 
