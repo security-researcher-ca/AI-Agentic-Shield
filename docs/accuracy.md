@@ -4,22 +4,15 @@ Measured across 123 test cases covering 8 threat kingdoms (destructive ops, cred
 
 | Metric | Regex Only | Pipeline (6-layer) | Improvement |
 |--------|-----------|--------------------------------------|-------------|
-| **Precision** | 79.3% | 100.0% | +20.7pp |
-| **Recall** | 59.0% | 96.2% | +37.2pp |
-| True Positives | 46 | 102 | +56 |
-| True Negatives | 33 | 17 | +4 |
+| **Precision** | 79.3% | **100.0%** | +20.7pp |
+| **Recall** | 59.0% | **100.0%** | +41.0pp |
+| True Positives | 46 | 106 | +60 |
+| True Negatives | 17 | 17 | 0 |
 | False Positives | 12 | 0 | −12 |
-| False Negatives | 32 | 4 | −28 |
+| False Negatives | 32 | 0 | −32 |
 
 > Run `go test -v -run TestAccuracyMetrics ./internal/analyzer/` for regex-only metrics.
 > Run `go test -v -run TestPipelineAccuracyMetrics ./internal/analyzer/` for pipeline metrics.
-
-## Remaining Gaps (Phase 3+)
-
-The 4 remaining FN cases are known gaps requiring deeper analysis:
-- **Reverse shell detection** — Python/Ruby socket-based reverse shells (2 FN)
-- **While-loop fork bomb** — `while true; do bash & done` (1 FN)
-- **SSH directory archival** — `tar czf /tmp/keys.tar.gz ~/.ssh/` (1 FN)
 
 Regenerate the full failing test list anytime:
 

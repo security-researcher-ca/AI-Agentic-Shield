@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Claude Code PreToolUse hook** — native integration that intercepts every Bash tool call before execution; blocks map to exit code 2 so Claude Code surfaces the reason. Install with `agentshield setup claude-code`; disable with `agentshield setup claude-code --disable`. The hook auto-detects the Claude Code JSON format (`hook_event_name`) alongside existing Windsurf and Cursor detection.
+- **Audit log rotation** — `audit.jsonl` now auto-rotates at 10 MB: the current file is renamed to `audit.jsonl.1` (replacing any prior backup) and a fresh log is started. No configuration needed; the 10 MB limit is compiled in as `defaultMaxLogBytes`.
 - **MCP Communication Mediation** — stdio proxy intercepts and evaluates MCP tool calls between IDE agents and MCP servers (`agentshield mcp-proxy`)
 - **MCP Policy Engine** — blocked tools list, glob/regex tool name matching, argument pattern matching via `mcp-policy.yaml`
 - **Tool Description Poisoning Detection (P1)** — scans `tools/list` responses for hidden instructions, credential harvesting, exfiltration intent, cross-tool shadowing, stealth instructions; poisoned tools silently hidden from IDE

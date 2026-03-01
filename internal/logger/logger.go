@@ -2,11 +2,15 @@ package logger
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 
 	"github.com/gzhole/agentshield/internal/redact"
 )
+
+// defaultMaxLogBytes is the file size at which the log is rotated (10 MB).
+const defaultMaxLogBytes = 10 * 1024 * 1024
 
 type AuditEvent struct {
 	Timestamp      string   `json:"timestamp"`
@@ -39,6 +43,7 @@ func (e AuditEvent) DisplayLabel() string {
 }
 
 type AuditLogger struct {
+	path string
 	file *os.File
 	mu   sync.Mutex
 }
@@ -49,12 +54,46 @@ func New(path string) (*AuditLogger, error) {
 		return nil, err
 	}
 
-	return &AuditLogger{file: file}, nil
+	return &AuditLogger{path: path, file: file}, nil
+}
+
+// rotateIfNeeded rotates the log file if it has reached defaultMaxLogBytes.
+// It renames the current file to <path>.1 (dropping any existing .1) and
+// opens a fresh log file. Must be called with l.mu held.
+func (l *AuditLogger) rotateIfNeeded() error {
+	info, err := l.file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat log file: %w", err)
+	}
+	if info.Size() < defaultMaxLogBytes {
+		return nil
+	}
+
+	if err := l.file.Close(); err != nil {
+		return fmt.Errorf("close log before rotation: %w", err)
+	}
+
+	rotated := l.path + ".1"
+	_ = os.Remove(rotated)
+	if err := os.Rename(l.path, rotated); err != nil {
+		return fmt.Errorf("rotate log: %w", err)
+	}
+
+	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return fmt.Errorf("open fresh log after rotation: %w", err)
+	}
+	l.file = f
+	return nil
 }
 
 func (l *AuditLogger) Log(event AuditEvent) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if err := l.rotateIfNeeded(); err != nil {
+		fmt.Fprintf(os.Stderr, "[AgentShield] warning: log rotation failed: %v\n", err)
+	}
 
 	// Redact sensitive data before logging
 	event.Command = redact.Redact(event.Command)

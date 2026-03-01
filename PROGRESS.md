@@ -327,3 +327,28 @@
 - [x] Remove empty `Others/` folder ✅
 - [x] Fix typo: `agent_gateway_desing.md` → `agent_gateway_design.md` ✅
 - [x] No duplicate at repo root ✅
+
+---
+
+## Phase 7 — Claude Code Native Hook + Log Rotation
+
+### Claude Code PreToolUse Hook
+- [x] Extended `hookInput` struct with `HookEventName`, `ToolName`, `ToolInput` (Claude Code JSON format)
+- [x] `handleClaudeCodeHook()` in `internal/cli/hook.go` — Bash-only evaluation, exit 2 on BLOCK
+- [x] Dispatch in `hookCommand()` now checks `HookEventName != ""` before Cursor/Windsurf
+- [x] `setupClaudeCodeCommand()` in `internal/cli/setup.go` — reads/writes `~/.claude/settings.json` as JSON map, idempotent
+- [x] `disableClaudeCodeHook()` — surgically removes AgentShield entry from `hooks.PreToolUse`, restores clean settings file
+- [x] `agentshield setup claude-code` — enables hook
+- [x] `agentshield setup claude-code --disable` — removes hook
+
+### Audit Log Rotation
+- [x] `AuditLogger` now stores `path` field (required for rename-on-rotate)
+- [x] `rotateIfNeeded()` in `internal/logger/logger.go` — renames `.jsonl` → `.jsonl.1`, opens fresh file; called on every write inside the mutex
+- [x] `defaultMaxLogBytes = 10 * 1024 * 1024` (10 MB) — compiled-in constant, 1 backup kept
+- [x] `TestAuditLogger_Rotation` added to `internal/logger/logger_test.go`
+
+### Integration Test Results
+- Smoke test (BLOCK): `echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | agentshield hook` → exit 2 ✅
+- Smoke test (ALLOW): `echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls /tmp"}}' | agentshield hook` → exit 0 ✅
+- `agentshield log | tail -3` shows `source: claude-code-hook` ✅
+- `agentshield setup claude-code --disable` restores `~/.claude/settings.json` to `{}` ✅

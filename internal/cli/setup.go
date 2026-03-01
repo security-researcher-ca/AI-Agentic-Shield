@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -45,12 +46,25 @@ AgentShield's 6-layer security pipeline.
 	RunE: setupOpenClawCommand,
 }
 
+var setupClaudeCodeCmd = &cobra.Command{
+	Use:   "claude-code",
+	Short: "Set up AgentShield for Claude Code (PreToolUse hook)",
+	Long: `Install or remove the PreToolUse hook so every Bash tool call Claude Code
+makes is evaluated by AgentShield before execution.
+
+  agentshield setup claude-code             # enable hook
+  agentshield setup claude-code --disable   # disable hook`,
+	RunE: setupClaudeCodeCommand,
+}
+
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Set up AgentShield for your environment",
 	Long: `Set up AgentShield integration with IDE agents and install default policy packs.
 
 IDE-specific setup:
+  agentshield setup claude-code           # install Claude Code PreToolUse hook
+  agentshield setup claude-code --disable # remove Claude Code hook
   agentshield setup windsurf              # install Cascade Hooks
   agentshield setup windsurf --disable    # remove Cascade Hooks
   agentshield setup cursor                # install Cursor Hooks
@@ -76,9 +90,11 @@ func init() {
 	setupWindsurfCmd.Flags().BoolVar(&disableFlag, "disable", false, "Remove AgentShield hooks and disable integration")
 	setupCursorCmd.Flags().BoolVar(&disableFlag, "disable", false, "Remove AgentShield hooks and disable integration")
 	setupOpenClawCmd.Flags().BoolVar(&disableFlag, "disable", false, "Remove AgentShield hooks and disable integration")
+	setupClaudeCodeCmd.Flags().BoolVar(&disableFlag, "disable", false, "Remove AgentShield hooks and disable integration")
 	setupCmd.AddCommand(setupWindsurfCmd)
 	setupCmd.AddCommand(setupCursorCmd)
 	setupCmd.AddCommand(setupOpenClawCmd)
+	setupCmd.AddCommand(setupClaudeCodeCmd)
 	rootCmd.AddCommand(setupCmd)
 }
 
@@ -517,6 +533,201 @@ func disableOpenClawHook(hookDir string) error {
 	return nil
 }
 
+// ─── Claude Code Setup ───────────────────────────────────────────────────────
+
+// agentshieldHookEntry is the hook object we insert into Claude Code settings.
+var agentshieldHookEntry = map[string]interface{}{
+	"matcher": "Bash",
+	"hooks": []interface{}{
+		map[string]interface{}{
+			"type":    "command",
+			"command": "agentshield hook",
+		},
+	},
+}
+
+func setupClaudeCodeCommand(cmd *cobra.Command, args []string) error {
+	settingsPath := filepath.Join(os.Getenv("HOME"), ".claude", "settings.json")
+
+	if disableFlag {
+		return disableClaudeCodeHook(settingsPath)
+	}
+
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println("  AgentShield + Claude Code (PreToolUse Hook)")
+	fmt.Println("═══════════════════════════════════════════════════════")
+	fmt.Println()
+
+	binPath, err := exec.LookPath("agentshield")
+	if err != nil {
+		fmt.Println("⚠  agentshield not found in PATH. Install it first:")
+		fmt.Println("   brew tap gzhole/tap && brew install agentshield")
+		return nil
+	}
+	fmt.Printf("✅ agentshield found: %s\n", binPath)
+
+	// Read or initialise settings.json
+	settings, err := readClaudeSettings(settingsPath)
+	if err != nil {
+		return err
+	}
+
+	// Navigate to hooks → PreToolUse
+	hooks := getOrCreateMap(settings, "hooks")
+	preToolUse := getOrCreateSlice(hooks, "PreToolUse")
+
+	// Check whether our entry is already present
+	for _, entry := range preToolUse {
+		if isAgentShieldHookEntry(entry) {
+			fmt.Printf("✅ Claude Code hook already configured: %s\n", settingsPath)
+			fmt.Println()
+			fmt.Println("AgentShield is active. Test it by asking Claude Code to run:")
+			fmt.Println("  rm -rf /")
+			fmt.Println()
+			fmt.Println("To disable: agentshield setup claude-code --disable")
+			fmt.Println()
+			printStatus()
+			return nil
+		}
+	}
+
+	hooks["PreToolUse"] = append(preToolUse, agentshieldHookEntry)
+	settings["hooks"] = hooks
+
+	if err := writeClaudeSettings(settingsPath, settings); err != nil {
+		return err
+	}
+
+	fmt.Printf("✅ PreToolUse hook installed: %s\n", settingsPath)
+	fmt.Println()
+	fmt.Println("How it works:")
+	fmt.Println("  1. Claude Code is about to run a Bash tool call")
+	fmt.Println("  2. The PreToolUse hook calls `agentshield hook`")
+	fmt.Println("  3. AgentShield evaluates the command against your policy")
+	fmt.Println("  4. If BLOCK: Claude Code is prevented from running the command")
+	fmt.Println("  5. If ALLOW/AUDIT: the command runs normally")
+	fmt.Println()
+	fmt.Println("To disable: agentshield setup claude-code --disable")
+	fmt.Println()
+	fmt.Println("Test by asking Claude Code to run: rm -rf /")
+	fmt.Println()
+	printStatus()
+	return nil
+}
+
+func disableClaudeCodeHook(settingsPath string) error {
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		fmt.Println("ℹ  No settings.json found for Claude Code — nothing to disable.")
+		return nil
+	}
+
+	settings, err := readClaudeSettings(settingsPath)
+	if err != nil {
+		return err
+	}
+
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		fmt.Println("ℹ  Claude Code settings.json has no hooks — nothing to disable.")
+		return nil
+	}
+
+	preToolUse, _ := hooks["PreToolUse"].([]interface{})
+	filtered := preToolUse[:0]
+	removed := false
+	for _, entry := range preToolUse {
+		if isAgentShieldHookEntry(entry) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+
+	if !removed {
+		fmt.Println("ℹ  AgentShield hook not found in Claude Code settings — nothing to disable.")
+		return nil
+	}
+
+	if len(filtered) == 0 {
+		delete(hooks, "PreToolUse")
+	} else {
+		hooks["PreToolUse"] = filtered
+	}
+	if len(hooks) == 0 {
+		delete(settings, "hooks")
+	} else {
+		settings["hooks"] = hooks
+	}
+
+	if err := writeClaudeSettings(settingsPath, settings); err != nil {
+		return err
+	}
+
+	fmt.Printf("✅ AgentShield hook disabled for Claude Code\n")
+	fmt.Printf("   Settings: %s\n", settingsPath)
+	fmt.Println()
+	fmt.Println("Re-enable anytime with: agentshield setup claude-code")
+	return nil
+}
+
+// isAgentShieldHookEntry returns true if the hook entry contains our command.
+func isAgentShieldHookEntry(entry interface{}) bool {
+	m, ok := entry.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	subHooks, _ := m["hooks"].([]interface{})
+	for _, h := range subHooks {
+		if hm, ok := h.(map[string]interface{}); ok {
+			if hm["command"] == "agentshield hook" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func readClaudeSettings(path string) (map[string]interface{}, error) {
+	settings := make(map[string]interface{})
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return nil, fmt.Errorf("failed to parse %s: %w", path, err)
+		}
+	}
+	return settings, nil
+}
+
+func writeClaudeSettings(path string, settings map[string]interface{}) error {
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+	if err := os.WriteFile(path, out, 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	return nil
+}
+
+func getOrCreateMap(parent map[string]interface{}, key string) map[string]interface{} {
+	if v, ok := parent[key].(map[string]interface{}); ok {
+		return v
+	}
+	m := make(map[string]interface{})
+	parent[key] = m
+	return m
+}
+
+func getOrCreateSlice(parent map[string]interface{}, key string) []interface{} {
+	if v, ok := parent[key].([]interface{}); ok {
+		return v
+	}
+	return nil
+}
+
 // findOpenClawHookSource looks for the openclaw-hook directory in known locations.
 func findOpenClawHookSource() string {
 	candidates := []string{
@@ -592,7 +803,12 @@ func printSetupInstructions() {
 
 	fmt.Println("─── Claude Code ───────────────────────────────────────")
 	fmt.Println()
-	fmt.Println("  Set the shell override in Claude Code settings:")
+	fmt.Println("  Uses native PreToolUse hooks — no shell changes needed.")
+	fmt.Println("  One command to install:")
+	fmt.Println()
+	fmt.Println("    agentshield setup claude-code")
+	fmt.Println()
+	fmt.Println("  Or set the shell override in Claude Code settings:")
 	fmt.Println()
 	fmt.Printf("    \"shell\": \"%s\"\n", wrapperPath)
 	fmt.Println()
@@ -621,9 +837,10 @@ func printSetupInstructions() {
 	fmt.Println("─── Disable / Re-enable ──────────────────────────────")
 	fmt.Println()
 	fmt.Println("  # Remove hooks (permanent until re-enabled):")
-	fmt.Println("  agentshield setup windsurf --disable")
-	fmt.Println("  agentshield setup cursor   --disable")
-	fmt.Println("  agentshield setup mcp      --disable")
+	fmt.Println("  agentshield setup claude-code --disable")
+	fmt.Println("  agentshield setup windsurf    --disable")
+	fmt.Println("  agentshield setup cursor      --disable")
+	fmt.Println("  agentshield setup mcp         --disable")
 	fmt.Println()
 	fmt.Println("  # Quick bypass (env var, current session only):")
 	fmt.Println("  export AGENTSHIELD_BYPASS=1    # temporarily disable")

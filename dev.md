@@ -5,7 +5,7 @@ AgentShield is a local-first security gateway that sits between AI agents and hi
 **Current scope:**
 - **Shell command mediation** — 6-layer analyzer pipeline (regex, structural, semantic, dataflow, stateful, guardian)
 - **MCP tool call mediation** — stdio proxy with policy evaluation, tool description poisoning detection, and argument content scanning
-- **IDE integrations** — Windsurf hooks, Cursor hooks, Claude Code hooks, Cursor/Claude Desktop MCP proxy setup
+- **IDE integrations** — Claude Code PreToolUse hook, Windsurf Cascade hooks, Cursor hooks, OpenClaw bootstrap hook, Cursor/Claude Desktop MCP proxy setup
 
 ## Documentation
 

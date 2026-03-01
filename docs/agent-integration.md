@@ -38,6 +38,9 @@ AgentShield mediates two channels. Integrate one or both depending on the enviro
 Check which IDE/agent environment is running:
 
 ```bash
+# Claude Code (PreToolUse hook)
+test -f ~/.claude/settings.json && echo "CLAUDE_CODE"
+
 # Windsurf (Cascade Hooks)
 test -d ~/.codeium/windsurf && echo "WINDSURF"
 
@@ -46,9 +49,6 @@ test -d ~/.cursor && echo "CURSOR"
 
 # OpenClaw (Agent Bootstrap Hook)
 test -d ~/.openclaw && echo "OPENCLAW"
-
-# Claude Code
-test -f ~/.claude/settings.json && echo "CLAUDE_CODE"
 ```
 
 ### Step 2: Install hooks
@@ -56,9 +56,10 @@ test -f ~/.claude/settings.json && echo "CLAUDE_CODE"
 For known IDEs, use the built-in setup:
 
 ```bash
-agentshield setup windsurf   # Windsurf
-agentshield setup cursor     # Cursor
-agentshield setup openclaw   # OpenClaw
+agentshield setup claude-code  # Claude Code — PreToolUse hook (native)
+agentshield setup windsurf     # Windsurf — Cascade Hooks
+agentshield setup cursor       # Cursor — beforeShellExecution hook
+agentshield setup openclaw     # OpenClaw — Agent Bootstrap Hook
 ```
 
 ### Step 3: Generic integration (any environment)
@@ -205,9 +206,10 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | agentshield 
 
 ```bash
 # Remove shell hooks
-agentshield setup windsurf --disable
-agentshield setup cursor --disable
-agentshield setup openclaw --disable
+agentshield setup claude-code --disable
+agentshield setup windsurf    --disable
+agentshield setup cursor      --disable
+agentshield setup openclaw    --disable
 
 # Restore original MCP configs
 agentshield setup mcp --disable
@@ -235,6 +237,7 @@ Agents can check integration status programmatically:
 command -v agentshield >/dev/null 2>&1 && echo "INSTALLED" || echo "NOT_INSTALLED"
 
 # Is shell hook active? (check for agentshield in hook files)
+grep -l "agentshield" ~/.claude/settings.json 2>/dev/null && echo "CLAUDE_CODE_HOOKED"
 grep -rl "agentshield" ~/.codeium/windsurf/hooks.json 2>/dev/null && echo "WINDSURF_HOOKED"
 grep -rl "agentshield" ~/.cursor/hooks.json 2>/dev/null && echo "CURSOR_HOOKED"
 
@@ -262,7 +265,8 @@ AgentShield operates as a **user-space policy gate**. It does not require root a
 
 ```
 # Shell integration
-agentshield setup <ide>              # Install hooks
+agentshield setup claude-code        # Claude Code PreToolUse hook
+agentshield setup <ide>              # Install hooks (windsurf / cursor / openclaw)
 agentshield setup <ide> --disable    # Remove hooks
 agentshield run -- <command>         # Evaluate + run a single command
 

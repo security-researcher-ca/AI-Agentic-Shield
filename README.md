@@ -35,10 +35,11 @@ curl -sSL https://raw.githubusercontent.com/gzhole/LLM-Agentic-Shield/main/scrip
 ## Quick Start
 
 ```bash
-# Set up IDE hooks (one command)
-agentshield setup windsurf   # Windsurf (Cascade Hooks)
-agentshield setup cursor     # Cursor (Cursor Hooks)
-agentshield setup openclaw   # OpenClaw (Agent Bootstrap Hook)
+# Set up IDE hooks (one command per IDE)
+agentshield setup claude-code  # Claude Code (PreToolUse hook — native)
+agentshield setup windsurf     # Windsurf (Cascade Hooks)
+agentshield setup cursor       # Cursor (Cursor Hooks)
+agentshield setup openclaw     # OpenClaw (Agent Bootstrap Hook)
 
 # Set up MCP proxy (wraps all detected MCP servers)
 agentshield setup mcp
@@ -85,21 +86,23 @@ drwxr-xr-x  12 user  staff  384 ...    # executes normally
 
 | IDE / Agent | Hook System | Setup | How it blocks |
 |-------------|-------------|-------|---------------|
+| **Claude Code** | PreToolUse hook (native) | `agentshield setup claude-code` | Exit code 2 |
 | **Windsurf** | Cascade Hooks (`pre_run_command`) | `agentshield setup windsurf` | Exit code 2 |
 | **Cursor** | Cursor Hooks (`beforeShellExecution`) | `agentshield setup cursor` | JSON `permission: deny` |
 | **OpenClaw** | Agent Bootstrap Hook (`agent:bootstrap`) | `agentshield setup openclaw` | Exit code 1 via `agentshield run` |
-| **Claude Code** | Shell wrapper | `agentshield setup --install` | Exit code 1 |
 | **LangChain / Custom** | CLI wrapping | `agentshield run -- <cmd>` | Exit code 1 |
 
 <details><summary>Disable / Re-enable</summary>
 
 ```bash
 # Remove hooks (permanent until re-enabled):
-agentshield setup windsurf --disable
-agentshield setup cursor   --disable
-agentshield setup openclaw --disable
+agentshield setup claude-code --disable
+agentshield setup windsurf    --disable
+agentshield setup cursor      --disable
+agentshield setup openclaw    --disable
 
 # Re-enable:
+agentshield setup claude-code
 agentshield setup windsurf
 agentshield setup cursor
 agentshield setup openclaw
@@ -116,7 +119,7 @@ AgentShield uses `~/.agentshield/` for runtime data:
 
 ```
 ~/.agentshield/
-├── audit.jsonl        # Append-only audit log (auto-created)
+├── audit.jsonl        # Audit log — auto-rotates at 10 MB (keeps 1 backup: audit.jsonl.1)
 ├── mcp-policy.yaml    # MCP proxy policy (auto-created by setup mcp)
 └── packs/             # Policy packs (installed via `agentshield setup --install`)
     ├── terminal-safety.yaml
@@ -156,7 +159,7 @@ See the **[Policy Authoring Guide](docs/policy-guide.md)** for full rule syntax,
 - **Argument content scanning** — detects SSH keys, AWS credentials, API tokens, .env contents, and large base64 blobs in MCP tool call arguments ([details](docs/mcp-mediation.md#argument-content-scanning))
 - **Config file write protection** — blocks writes to IDE hooks, MCP configs, shell dotfiles, package manager configs, and AgentShield’s own policy files ([details](docs/mcp-mediation.md#config-file-write-protection))
 - **Value limits on tool call arguments** — enforces numeric thresholds (max/min) on MCP tool call arguments to prevent uncontrolled resource commitment — e.g., [the Lobstar Wilde incident](https://medium.com/@gzxuexi/from-rm-rf-to-250k-why-every-ai-agent-needs-a-policy-gate-550c62459011) where an AI agent sent 52,000,000 SOL instead of 4, causing ~$250K in losses. AgentShield would have blocked this. ([details](docs/mcp-mediation.md#value-limits))
-- **100% precision / 96.2% recall** across 123 shell threat test cases ([details](docs/accuracy.md))
+- **100% precision / 100% recall** across 123 shell threat test cases ([details](docs/accuracy.md))
 - **24/24 MCP red-team cases** pass (blocked tools, credential access, system writes, evasion)
 - **Protected paths** — `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`
 - **Prompt injection detection** — instruction overrides, obfuscation, base64 payloads

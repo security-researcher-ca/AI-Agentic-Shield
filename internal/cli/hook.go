@@ -17,8 +17,9 @@ import (
 )
 
 // hookInput represents the JSON structure sent by IDE hooks.
-// Windsurf sends: {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "..."}}
-// Cursor sends:   {"command": "...", "cwd": "..."}
+// Windsurf sends:    {"agent_action_name": "pre_run_command", "tool_info": {"command_line": "..."}}
+// Cursor sends:      {"command": "...", "cwd": "..."}
+// Claude Code sends: {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "..."}}
 type hookInput struct {
 	// Windsurf fields
 	AgentActionName string   `json:"agent_action_name"`
@@ -30,12 +31,21 @@ type hookInput struct {
 	// Cursor fields
 	Command string `json:"command"`
 	Cwd     string `json:"cwd"`
+
+	// Claude Code fields
+	HookEventName string          `json:"hook_event_name"`
+	ToolName      string          `json:"tool_name"`
+	ToolInput     claudeToolInput `json:"tool_input"`
 }
 
 type toolInfo struct {
 	CommandLine string `json:"command_line"`
 	Cwd         string `json:"cwd"`
 	FilePath    string `json:"file_path"`
+}
+
+type claudeToolInput struct {
+	Command string `json:"command"`
 }
 
 // cursorHookOutput is the JSON response Cursor expects from hook scripts.
@@ -48,15 +58,17 @@ type cursorHookOutput struct {
 
 var hookCmd = &cobra.Command{
 	Use:   "hook",
-	Short: "IDE Hook handler for Windsurf and Cursor integration",
+	Short: "IDE Hook handler for Windsurf, Cursor, and Claude Code integration",
 	Long: `Reads an IDE hook JSON payload from stdin, evaluates the command
 against AgentShield policy, and responds in the correct format.
 
 Auto-detects the IDE based on the JSON input structure:
-  Windsurf — uses exit code 2 to block actions
-  Cursor   — returns JSON with permission: deny/allow
+  Claude Code — uses exit code 2 to block Bash tool calls
+  Windsurf    — uses exit code 2 to block actions
+  Cursor      — returns JSON with permission: deny/allow
 
 Setup:
+  agentshield setup claude-code
   agentshield setup windsurf
   agentshield setup cursor`,
 	RunE: hookCommand,
@@ -91,8 +103,13 @@ func hookCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Auto-detect IDE format based on input fields.
-	// Cursor sends {"command": "..."} at the top level.
-	// Windsurf sends {"agent_action_name": "pre_run_command", "tool_info": {...}}.
+	// Claude Code sends {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {...}}.
+	// Cursor sends      {"command": "..."} at the top level.
+	// Windsurf sends    {"agent_action_name": "pre_run_command", "tool_info": {...}}.
+	if input.HookEventName != "" {
+		return handleClaudeCodeHook(input)
+	}
+
 	if input.Command != "" {
 		return handleCursorHook(input)
 	}
@@ -230,4 +247,31 @@ func outputCursorAllow() {
 	}
 	data, _ := json.Marshal(output)
 	fmt.Println(string(data))
+}
+
+// handleClaudeCodeHook processes Claude Code PreToolUse hooks.
+// Only Bash tool calls are evaluated; other tools pass through.
+// Block → print reason to stdout + exit 2. Allow/Audit → exit 0.
+func handleClaudeCodeHook(input hookInput) error {
+	if input.ToolName != "Bash" {
+		return nil
+	}
+
+	cmdStr := input.ToolInput.Command
+	if cmdStr == "" {
+		return nil
+	}
+
+	evalResult, _, err := evaluateCommand(cmdStr, "", "claude-code-hook")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[AgentShield] warning: %v\n", err)
+		return nil // fail open
+	}
+
+	if evalResult.Decision == policy.DecisionBlock {
+		fmt.Printf("🛑 BLOCKED by AgentShield\n%s\n", evalResult.Explanation)
+		os.Exit(2)
+	}
+
+	return nil
 }
