@@ -82,6 +82,22 @@ rules:
     decision: "BLOCK"
     reason: "Bash /dev/tcp is commonly used for reverse shells."
 
+  - id: "ts-block-python-reverse-shell"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
+    match:
+      command_regex: "python[23]?\\s+-[cC]\\s+['\"].*socket\\.socket\\(.*\\.connect\\("
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Python one-liner with socket.connect() is a reverse shell pattern."
+
+  - id: "ts-block-ruby-reverse-shell"
+    taxonomy: "data-exfiltration/network-egress/reverse-shell"
+    match:
+      command_regex: "ruby\\s+.*(-rsocket|-e).*TCPSocket"
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Ruby one-liner using TCPSocket is a reverse shell pattern."
+
   # === BLOCK: System shutdown/reboot ===
   - id: "ts-block-shutdown"
     match:

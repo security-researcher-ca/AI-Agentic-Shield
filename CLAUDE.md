@@ -1,0 +1,133 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```bash
+make build        # Build binary to ./build/agentshield
+make test         # Run all tests (go test -v ./...)
+make lint         # Run golangci-lint
+make lint-fix     # Run linter with auto-fix
+make check        # Full pre-commit check: lint-fix + test + build
+make run ARGS="run -- echo hi"  # Build and run with arguments
+make install      # Install to /usr/local/bin
+
+# Run a single package's tests
+go test -v ./internal/analyzer/...
+
+# Run a specific test
+go test -v -run TestAccuracy ./internal/analyzer/
+
+# Regenerate failing tests report
+go test -v -run TestGenerateFailingTestsReport ./internal/analyzer/
+```
+
+Go 1.23+ is required. Dependencies: `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config), `mvdan.cc/sh/v3` (shell AST parsing).
+
+## Code Style
+
+See global rules in `~/.claude/CLAUDE.md` for the Fowler philosophy and Go standards. Project-specific additions:
+
+- **Test before fix**: When closing a false negative, add the failing test case first, then write the fix
+- **Known gaps**: Mark test cases with `KnownGap: true` — never leave unexplained failures
+- **Confidence scores**: Always set on `Finding`; default to 0.85 if uncertain
+- **Fail safe**: Policy evaluation must never panic — return the default decision (AUDIT) on any error
+- **Accuracy test caveat**: The accuracy test runner passes `nil` for paths (`engine.Evaluate(tc.Command, nil)`), so `protected_paths` checks are not exercised by tests — use structural/regex rules to cover those cases in tests
+
+## Architecture Overview
+
+AgentShield is a **local-first runtime security gateway** that sits between AI agents (Cursor, Windsurf, Claude Code, etc.) and the OS, evaluating every shell command through a 6-layer analyzer pipeline before execution. It also mediates MCP (Model Context Protocol) tool calls.
+
+### 6-Layer Analyzer Pipeline
+
+Defined in `internal/policy/pipeline.go` and `internal/analyzer/`. The pipeline runs in order:
+
+```
+regex → structural → semantic → dataflow → stateful → guardian
+  ↓         ↓           ↓          ↓          ↓          ↓
+           Combiner (most_restrictive_wins) → Policy Engine
+```
+
+1. **Regex** (`internal/analyzer/regex.go`) — Pattern matching (prefix, exact, regex). Catches obvious threats like `rm -rf /`, `curl | bash`.
+2. **Structural** (`internal/analyzer/structural.go`) — Shell AST parsing via `mvdan.cc/sh`. Normalizes flags (catches `--recursive` as `-r`), detects pipes, handles sudo wrapping. Produces `ParsedCommand` in `AnalysisContext`.
+3. **Semantic** (`internal/analyzer/semantic.go`) — Intent classification (file-delete, network-exfil, code-execute, etc.). Catches alternative destructive tools (`shred`, `wipefs`, `find -delete`). Produces `CommandIntent` slice.
+4. **Dataflow** (`internal/analyzer/dataflow.go`) — Source→sink taint tracking through pipes/redirects. Catches exfiltration chains (`cat ~/.ssh/id_rsa | base64 | curl`).
+5. **Stateful** (`internal/analyzer/stateful.go`) — Multi-step attack chain detection within compound commands connected by `&&`, `||`, `;`, `|`.
+6. **Guardian** (`internal/guardian/`) — Heuristic-based detection: prompt injection, inline secrets, obfuscation, bulk exfiltration.
+
+The `AnalysisContext` (`internal/analyzer/types.go`) carries enrichments through all layers — each analyzer reads from and writes to it. The Combiner uses `most_restrictive_wins`: `BLOCK > AUDIT > ALLOW`.
+
+### Policy Engine
+
+`internal/policy/engine.go` evaluates commands against policy rules. `BuildAnalyzerPipeline` in `pipeline.go` routes each YAML rule to the correct analyzer based on its `match` type. The policy engine falls back to regex-only if the pipeline is disabled. Default decision is `AUDIT`.
+
+**Policy YAML schema** (`internal/policy/types.go`):
+```yaml
+version: "0.1"
+defaults:
+  decision: "AUDIT"
+  protected_paths: ["~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "~/.kube/**"]
+
+rules:
+  - id: "rule-id"
+    taxonomy: "kingdom/subcategory/specific"
+    match:
+      command_regex: "..."           # → RegexAnalyzer
+      structural:                    # → StructuralAnalyzer (AST-based)
+        executable: ["rm", "unlink"]
+        flags_all: ["r", "f"]
+        args_any: ["/"]
+      dataflow:                      # → DataflowAnalyzer
+        source: {type: "credential"}
+        sink: {type: "network"}
+      semantic:                      # → SemanticAnalyzer
+        intent_any: ["file-delete"]
+        risk_min: "high"
+      stateful:                      # → StatefulAnalyzer
+        chain:
+          - executable_any: ["curl", "wget"]
+            operator: "&&"
+          - executable_any: ["bash", "sh"]
+    decision: "BLOCK"
+    reason: "Human-readable explanation"
+    confidence: 0.95
+```
+
+### MCP Mediation
+
+`internal/mcp/` intercepts Model Context Protocol JSON-RPC calls (both stdio proxy in `proxy.go` and HTTP Streamable proxy in `http_proxy.go`). Key components:
+- `handler.go` — Core JSON-RPC dispatch
+- `description_scanner.go` — Detects tool description poisoning (hidden instructions, credential harvesting prompts)
+- `content_scanner.go` — Scans tool call arguments for SSH keys, AWS credentials, base64 blobs
+- `config_guard.go` — Guards config file writes from MCP tools
+- `policy.go` — MCP-specific policy evaluation
+
+### Test Infrastructure
+
+Test cases live in `internal/analyzer/testdata/` organized by threat kingdom (credential_exposure, data_exfiltration, destructive_ops, persistence_evasion, privilege_escalation, reconnaissance, supply_chain, unauthorized_execution). `all_cases.go` aggregates them. Each case has an ID, command, expected decision, taxonomy ref, and optional `KnownGap` flag.
+
+**Current status**: 123 test cases, 99.2% pass rate, 1 known false negative tracked in `FAILING_TESTS.md`. Known gaps:
+- `while true; do bash & done` fork bomb (while-loop structural detection — requires AST loop analysis)
+
+When adding new test cases, mark known gaps with the `KnownGap` field rather than leaving them as unexplained failures. Run `TestGenerateFailingTestsReport` to regenerate `FAILING_TESTS.md`.
+
+### CLI Commands
+
+Implemented in `internal/cli/` using Cobra. Key subcommands:
+- `run` — Execute a command through the analyzer pipeline
+- `setup` — Configure IDE hooks (Windsurf, Cursor, Claude Code)
+- `setup-mcp` — Configure MCP proxy
+- `mcp-proxy` — stdio MCP proxy mode
+- `mcp-http-proxy` — HTTP Streamable MCP proxy mode
+- `scan` — Scan a command without executing
+- `pack` — Manage policy packs
+- `log` — View audit logs
+
+### Policy Packs
+
+`packs/` contains built-in YAML policy packs (terminal-safety, secrets-pii, network-egress, supply-chain). `internal/policy/pack.go` handles loading. Custom user config lives at `~/.agentshield/`.
+
+### Taxonomy
+
+`taxonomy/` contains 32 YAML entries organized by 7 kingdoms, each mapping to OWASP LLM Top 10 2025. `internal/taxonomy/` handles loading and compliance index generation.

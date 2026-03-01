@@ -16,6 +16,7 @@ import (
 )
 
 var shellMode bool
+var verbose bool
 
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
@@ -32,6 +33,7 @@ Examples:
 
 func init() {
 	runCmd.Flags().BoolVar(&shellMode, "shell", false, "Treat args as a shell command string (handles pipes, redirects, etc.)")
+	runCmd.Flags().BoolVar(&verbose, "verbose", false, "Show which rules triggered the decision")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -102,6 +104,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	case policy.DecisionBlock:
 		fmt.Fprintln(os.Stderr, "\n\xf0\x9f\x9b\x91 BLOCKED by AgentShield")
 		fmt.Fprintln(os.Stderr, evalResult.Explanation)
+		if verbose && len(evalResult.TriggeredRules) > 0 {
+			fmt.Fprintln(os.Stderr, "Triggered rules:")
+			for i, rule := range evalResult.TriggeredRules {
+				reason := ""
+				if i < len(evalResult.Reasons) {
+					reason = ": " + evalResult.Reasons[i]
+				}
+				fmt.Fprintf(os.Stderr, "  [%d] %s%s\n", i+1, rule, reason)
+			}
+		}
 		if err := auditLogger.Log(event); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to write audit log: %v\n", err)
 		}
@@ -112,6 +124,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		// AUDIT adds a flag marker in the log for review.
 		if evalResult.Decision == policy.DecisionAudit {
 			event.Flagged = true
+			if verbose {
+				fmt.Fprintf(os.Stderr, "⚑ FLAGGED for review: %s\n", evalResult.Explanation)
+			}
 		}
 
 		var execCmd *exec.Cmd

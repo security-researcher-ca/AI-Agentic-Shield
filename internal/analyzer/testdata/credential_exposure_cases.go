@@ -150,15 +150,13 @@ var SSHPrivateKeyReadCases = []TestCase{
 		ID:               "FN-SSHKEY-001",
 		Command:          `tar czf /tmp/keys.tar.gz ~/.ssh/`,
 		ExpectedDecision: "BLOCK",
-		Classification:   "FN",
+		Classification:   "TP",
 		TaxonomyRef:      "credential-exposure/private-key-access/ssh-private-key-read",
-		Analyzer:         "semantic",
-		Description: `KNOWN FALSE NEGATIVE. Archiving the entire .ssh directory
-			captures all private keys. Current regex matches specific
-			filenames (id_rsa, id_ed25519) but not the directory itself.
-			The semantic analyzer should recognize that archiving ~/.ssh/
-			includes private keys.`,
-		Tags: []string{"known-gap"},
+		Analyzer:         "structural",
+		Description: `Archiving the entire .ssh directory captures all private keys.
+			Caught by the structural rule sec-block-archive-ssh-dir which
+			matches tar/zip/etc with ~/.ssh/ as an argument via args_any glob.`,
+		Tags: []string{"critical"},
 	},
 }
 
