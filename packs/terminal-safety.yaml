@@ -44,6 +44,14 @@ rules:
     decision: "BLOCK"
     reason: "Fork bomb detected — can crash the system."
 
+  - id: "ts-block-while-fork-bomb"
+    taxonomy: "destructive-ops/resource-exhaustion/fork-bomb"
+    match:
+      command_regex: "while\\s+(true|1|:)\\s*;?\\s*do\\s+.*&"
+    decision: "BLOCK"
+    confidence: 0.90
+    reason: "Infinite loop spawning background processes is a fork bomb pattern."
+
   # === BLOCK: Permission weakening ===
   - id: "ts-block-chmod-777"
     taxonomy: "destructive-ops/permission-weakening/chmod-world-writable"

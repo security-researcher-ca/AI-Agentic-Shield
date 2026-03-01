@@ -640,14 +640,13 @@ var ForkBombCases = []TestCase{
 		ID:               "FN-FORKBMB-003",
 		Command:          `while true; do bash & done`,
 		ExpectedDecision: "BLOCK",
-		Classification:   "FN",
+		Classification:   "TP",
 		TaxonomyRef:      "destructive-ops/resource-exhaustion/fork-bomb",
-		Analyzer:         "structural",
-		Description: `KNOWN FALSE NEGATIVE. Shell while-loop fork bomb. Different
-			syntax from the classic :(){ } form but equally destructive.
-			The structural analyzer should detect infinite loops spawning
-			background processes.`,
-		Tags: []string{"known-gap", "evasion"},
+		Analyzer:         "regex",
+		Description: `Shell while-loop fork bomb. Different syntax from the classic
+			:(){ } form but equally destructive. Detected by ts-block-while-fork-bomb
+			regex rule matching the infinite-loop + background-spawn pattern.`,
+		Tags: []string{"evasion"},
 	},
 }
 
